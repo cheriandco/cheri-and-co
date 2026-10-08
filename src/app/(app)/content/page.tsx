@@ -1,0 +1,92 @@
+import type { Metadata } from "next";
+import { ChevronRight } from "lucide-react";
+import { getApprovals, getBrandRules, getContent, getProducts } from "@/services";
+import { PageHeader, Tabs, DashboardCard, DataTable, SectionHeader, StatusBadge, Thumb, Money, EmptyState } from "@/components/ui";
+import { ContentList } from "@/components/domain";
+import { ApprovalQueue } from "@/components/interactive";
+
+export const metadata: Metadata = { title: "Content & Marketing" };
+
+const TABS = [
+  ["overview", "Overview"], ["calendar", "Content Calendar"], ["products", "Product Library"], ["brand", "Brand Brain"],
+  ["assets", "Creative Assets"], ["approvals", "Approvals"], ["published", "Published"], ["performance", "Performance"],
+].map(([id, label]) => ({ id, label }));
+
+const WORKFLOW = ["Product Library", "Brand Brain", "Content Strategy", "Content Calendar", "GPT Creative Brain", "Creative Generation", "Higgsfield", "Human Approval", "Publish / Export", "Performance"];
+
+export default async function ContentPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+  const { tab = "overview" } = await searchParams;
+  const [content, rules, products, approvals] = await Promise.all([getContent(), getBrandRules(), getProducts(), getApprovals()]);
+  const published = content.filter((c) => c.status === "published");
+
+  return (
+    <div className="stack">
+      <PageHeader eyebrow="Content & Marketing Agent" title="Content & marketing" subtitle="From product to published post — no prompts to write. Your agent plans, creates and waits for your approval." />
+      <Tabs base="/content" tabs={TABS} active={tab} />
+
+      {tab === "overview" && (
+        <div className="stack">
+          <DashboardCard>
+            <SectionHeader title="How content gets made" />
+            <ol className="flow" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              {WORKFLOW.map((w, i) => (
+                <li key={w} className="row" style={{ gap: 8 }}>
+                  <span className={w === "Human Approval" ? "on" : ""}>{w}</span>
+                  {i < WORKFLOW.length - 1 && <ChevronRight size={14} />}
+                </li>
+              ))}
+            </ol>
+          </DashboardCard>
+          <div className="grid even">
+            <DashboardCard><SectionHeader title="Coming up" href="/content?tab=calendar" /><ContentList items={content.filter((c) => c.status !== "published").slice(0, 4)} /></DashboardCard>
+            <DashboardCard><SectionHeader title="Needs your review" href="/approvals" /><ApprovalQueue initial={approvals.filter((a) => a.status === "pending" && a.type === "Content")} compact /></DashboardCard>
+          </div>
+        </div>
+      )}
+
+      {tab === "calendar" && <DashboardCard><ContentList items={content} /></DashboardCard>}
+
+      {tab === "products" && (
+        <DashboardCard flush>
+          <DataTable rows={products} columns={[
+            { header: "Product", primary: true, cell: (p) => <>{p.name}<small>{p.sku}</small></> },
+            { header: "Category", cell: (p) => p.category },
+            { header: "Price", cell: (p) => <Money value={p.price} /> },
+            { header: "Status", cell: (p) => <StatusBadge status={p.status} /> },
+          ]} />
+        </DashboardCard>
+      )}
+
+      {tab === "brand" && (
+        <div className="grid even">
+          {rules.map((r) => <DashboardCard key={r.id} tint><div className="eyebrow">{r.title}</div><p className="serif" style={{ fontSize: 22 }}>{r.detail}</p></DashboardCard>)}
+        </div>
+      )}
+
+      {tab === "assets" && (
+        content.length ? (
+          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))" }}>
+            {content.map((c) => (
+              <DashboardCard key={c.id}><Thumb tone={c.tone} size="lg" /><div style={{ marginTop: 10, fontWeight: 500 }}>{c.name}</div><div className="muted" style={{ fontSize: 12 }}>{c.type} · {c.platform}</div></DashboardCard>
+            ))}
+          </div>
+        ) : <EmptyState title="No creative assets yet" />
+      )}
+
+      {tab === "approvals" && <ApprovalQueue initial={approvals.filter((a) => a.type === "Content")} />}
+
+      {tab === "published" && <DashboardCard><ContentList items={published} /></DashboardCard>}
+
+      {tab === "performance" && (
+        <DashboardCard flush>
+          <DataTable rows={published} columns={[
+            { header: "Content", primary: true, cell: (c) => <>{c.name}<small>{c.platform} · {c.type}</small></> },
+            { header: "Published", cell: (c) => c.date },
+            { header: "Reach", cell: (c) => <span className="num">{c.reach?.toLocaleString("en-IN")}</span> },
+            { header: "Engagement", cell: (c) => <span className="num">{c.engagement}%</span> },
+          ]} />
+        </DashboardCard>
+      )}
+    </div>
+  );
+}
