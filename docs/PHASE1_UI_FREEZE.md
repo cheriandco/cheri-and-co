@@ -7,6 +7,7 @@
 - Design tokens and styling in `src/app/globals.css` (warm ivory / dusty rose / charcoal)
 - The five-agent architecture: B2C Sales, B2B Lead, Amazon Intelligence, Content & Marketing, CRM & Sales Ops.
   The AI Business Orchestrator is a coordination layer, **not** a sixth agent.
+  *This is a build rule set by the project owner (do not add or remove agents during Phase 1). Client confirmation that these five agents are the Cheri & Co. scope has not been recorded; see `docs/UX_FLOWS.md` §5.*
 - No new agents, no new design system, no redesign.
 
 Remaining work is wiring (data, auth, persistence, integrations), not UI rebuilds. Visual changes are
@@ -27,7 +28,16 @@ only acceptable to fix a clear functional inconsistency.
 
 ## Other gaps (not UI)
 - No authentication, role-based access or database row-level security yet.
-- No automated tests; accessibility checked by construction only (semantic markup, labels, focus styles).
+- Automated tests cover only the B2C Sales Agent prototype (35 tests); the dashboard, API routes and approval/task/pipeline flows have none. Accessibility was checked by construction only (semantic markup, labels, focus styles).
 - Unknown customer/retailer ids render the not-found page with HTTP 200 (streaming behaviour).
 - Tasks can be created via `POST /api/tasks` but there is no create-task form in the UI.
 - No agent orchestration or realtime updates yet.
+
+## Additions after the freeze commit (`db8fab2`), recorded in `3b15f34` and the working tree
+The baseline layout, navigation, design tokens and five-agent architecture are unchanged. These were added without redesign:
+
+- **B2C Sales Agent prototype** (`/b2c`): one card above the filter bar, using existing components and classes only. Rule-based, draft-only, sample catalogue, nothing sent or stored. API: `POST /api/agents/b2c/run`. Tests: `npm test` (35).
+- **Cheri & Co. branding:** the sidebar text brand is replaced by the supplied wordmark (`public/brand/`), in a pale-pink chip so it reads on the dark sidebar; favicon and Apple icon are crops of the original artwork. The product was renamed from the inherited IMI TIARA name in titles, README, package name and sample text.
+- **Dependencies:** `next` 16.4.1 (security patch), `vitest` (dev), transitive `zod` 4.6.7 (security patch, dev tooling only).
+- **Limitations list above still applies.** The hardcoded user and audit actor ("Anika") are placeholder values that predate the rename; they are not a real Cheri & Co. user. The B2C prototype adds no persistence, authentication or live integration.
+- **Source-of-truth documents:** `docs/DATABASE.md`, `docs/API.md` and `docs/UX_FLOWS.md` (drafts; inherited IMI TIARA assumptions are flagged as needing client confirmation).

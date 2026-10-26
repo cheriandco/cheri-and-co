@@ -1,0 +1,74 @@
+# UX_FLOWS.md — User flows source of truth (draft for review)
+
+**Status: DRAFT.** Describes the screens and flows that exist in the Phase 1 prototype, then the flows that were
+requested in the original (IMI TIARA-era) brief and are **not** yet confirmed for Cheri & Co.
+Legend as in `docs/DATABASE.md`. UI is frozen per `docs/PHASE1_UI_FREEZE.md`.
+
+## 1. Confirmed implementation
+
+### 1.1 Shell and navigation
+Left sidebar (Cheri & Co. wordmark, then Dashboard, B2C Sales, B2B Leads, Amazon Intelligence, Content & Marketing,
+CRM & Sales Ops, Approvals · Products, Customers, Retailers, Tasks & Follow-ups, Reports · Settings), top bar with search
+(`Ctrl+K`) and notifications, collapsible sidebar on mobile. Route-level loading, error and not-found screens cover all pages (`src/app/(app)`), and lists and tables show empty states.
+**There is no login page.** The user ("Anika") and role are hardcoded mock values.
+
+### 1.2 Dashboard (`/dashboard`)
+Greeting, date-range selector, six KPI cards, enquiries/leads trend chart (7/30/90 days), sales funnel, recent
+Instagram enquiries, agent activity (five agents), pending approvals, retailer leads, content calendar, Amazon
+insights, tasks. All numbers are mock.
+
+### 1.3 Approval flow (`/approvals`, also embedded on the dashboard and content page)
+`AI generated → Pending review → Approve / Reject / Edit → Execute → Completed`.
+Implemented: pending review, approve, reject (confirmation with optional reason), edit, and an audit trail list.
+**Not implemented:** the Execute and Completed steps (approval only changes status; nothing is executed or sent) and
+persistence (state resets on server restart).
+
+### 1.4 B2C Sales Agent prototype (`/b2c`)
+Panel above the filters: type a customer enquiry → "Run agent (simulated)" → shows the intent, a draft reply, the
+sample-catalogue recommendations, whether it escalated to a human and why, and a suggested next action.
+Labelled "Prototype · sample data" and "Not sent". Below it: the (mock) conversation list and filters.
+Error and validation states exist (empty input, over 1000 characters, network/server failure).
+
+### 1.5 Other flows
+- **CRM** (`/crm`, 7 tabs) including a drag-and-drop pipeline board (also keyboard-operable via a hidden select). Moves call `PATCH /api/pipeline/:id`; in-memory only.
+- **Tasks** (`/tasks`): complete, postpone (+1 day), reassign (Anika/Dev/Meera), open record. No create-task form in the UI.
+- **Customer and retailer detail pages** with an activity timeline and tasks. The timeline currently shows the same global sample activity feed for every record (not per-record history).
+- **Amazon** (8 tabs), **Content** (8 tabs with workflow strip), **Reports** (7 sections), **Products**, **Settings**: read-only mock views.
+- The date selector's "Custom" option does nothing yet.
+
+## 2. Approved business requirements for Cheri & Co.
+**None recorded from the client.** Inputs received so far are from the project owner: the Cheri & Co. logo, the
+instruction to build locally first, the requirement that the client owns the infrastructure, and a statement that the
+"approved business architecture" has five agents plus an orchestrator. That statement is evidence of the owner's
+intent, but no client confirmation of agent scope has been recorded, so the agents below stay under client review.
+No Cheri & Co. product, policy or process requirement has been supplied.
+
+## 3. Requested in original brief (inherited; requires client confirmation)
+Each item below was specified for IMI TIARA and is **not approved** for Cheri & Co. until confirmed:
+1. Five agents: B2C Sales, B2B Lead, Amazon Intelligence, Content & Marketing, CRM & Sales Operations, coordinated by an AI Business Orchestrator that is a coordination layer, not a sixth agent. *(The project owner describes this as the approved architecture; the client's own confirmation of scope is still to be recorded.)*
+2. Instagram as the B2C enquiry channel.
+3. Amazon and Flipkart click/purchase tracking and an Amazon Intelligence workflow.
+4. B2B retailer lead discovery and a sales pipeline (New → Qualified → Contacted → Interested → Negotiation → Won → Lost).
+5. Content workflow: Product Library → Brand Brain → Strategy → Calendar → GPT Creative Brain → Creative Generation → Higgsfield → Human Approval → Publish/Export → Performance.
+6. Roles and sign-in, notification centre, reports by area.
+
+## 4. Assumptions
+1. A human approves anything an agent drafts before it reaches a customer (consistent with the prototype's "draft only" behaviour).
+2. Escalation always routes to a named human; the target person or queue is not yet defined.
+3. Desktop-first, with tablet/mobile support.
+
+## 5. Open questions (client)
+1. Which of the five agents does Cheri & Co. want first, and in what order? Is B2B relevant at all?
+2. Is Instagram the right customer channel? Which others (WhatsApp, website chat, email)?
+3. Does Cheri & Co. sell on Amazon and/or Flipkart? Is marketplace intelligence in scope?
+4. Is Higgsfield (or any image/video generator) approved, and under which account?
+5. Policies the agent must reflect: returns/exchanges, shipping and delivery, discounts and offers, care instructions. Until supplied, the agent states that verified information is unavailable and escalates.
+6. Who handles escalations, during what hours, and what response time is expected?
+7. Brand voice, tone and claims rules for replies (e.g. terms that must not be used).
+8. Languages needed.
+9. Who approves content and replies, and is more than one approval level needed?
+10. What should happen after approval (the "Execute" step): send through which channel?
+
+## 6. Dependencies
+Answers to §5; client-owned accounts for each integration; authentication and roles (`docs/API.md` §5);
+a real product catalogue (`docs/DATABASE.md` §4); a staging environment for user-acceptance testing.
