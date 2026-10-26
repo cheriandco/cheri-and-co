@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -7,7 +8,7 @@ import {
   BarChart3, Bell, Building2, CheckCircle2, ChevronDown, ClipboardList, Gem, LayoutDashboard,
   LogOut, Megaphone, Menu, MessageCircleHeart, Search, Settings, ShoppingBag, Store, Users, UsersRound, X,
 } from "lucide-react";
-import { Avatar, Butterfly } from "./ui";
+import { Avatar } from "./ui";
 import type { AppNotification, User } from "@/types";
 
 const NAV = [
@@ -42,7 +43,10 @@ export function AppShell({ user, notifications, searchIndex, pending, children }
     <div className="shell">
       <aside className={`sidebar ${open ? "open" : ""}`} aria-label="Primary">
         <div className="brand">
-          <div className="brand-name"><Butterfly size={22} />IMI TIARA</div>
+          <Link href="/dashboard" className="brand-logo" aria-label="Cheri & Co. home">
+            {/* unoptimized: static brand asset served as-is, no image-optimizer endpoint involved */}
+            <Image src="/brand/cheri-and-co-wordmark.png" alt="Cheri & Co." width={800} height={228} priority unoptimized />
+          </Link>
           <div className="brand-sub">AI Commerce &amp; Business Operations</div>
         </div>
         <nav className="nav">
@@ -137,7 +141,7 @@ function SearchCommand({ items, onClose }: { items: SearchItem[]; onClose: () =>
     <div className="overlay" onMouseDown={onClose}>
       <div className="dialog cmd" role="dialog" aria-label="Search" onMouseDown={(e) => e.stopPropagation()}>
         <input
-          autoFocus placeholder="Search IMI TIARA…" aria-label="Search" value={q}
+          autoFocus placeholder="Search Cheri & Co.…" aria-label="Search" value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && results[0]) { router.push(results[0].href); onClose(); } }}
         />

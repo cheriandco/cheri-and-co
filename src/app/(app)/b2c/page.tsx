@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getConversations } from "@/services";
 import { PageHeader, DashboardCard, SectionHeader, FilterBar, EmptyState, Avatar, StatusBadge } from "@/components/ui";
 import { ConversationList } from "@/components/domain";
+import { B2CAgentPanel } from "@/components/b2c-agent-panel";
 
 export const metadata: Metadata = { title: "B2C Sales" };
 
@@ -20,6 +21,7 @@ export default async function B2CPage({ searchParams }: { searchParams: Promise<
   return (
     <div className="stack">
       <PageHeader eyebrow="B2C Sales Agent" title="B2C Sales" subtitle="Instagram enquiries answered by your AI sales agent, with human handover when it matters." />
+      <B2CAgentPanel />
       <FilterBar base="/b2c" param="status" options={OPTIONS} active={status} />
       <div className="grid two">
         <DashboardCard>

@@ -6,7 +6,7 @@ const serif = Cormorant_Garamond({ subsets: ["latin"], weight: ["400", "500", "6
 const sans = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
 
 export const metadata: Metadata = {
-  title: { default: "IMI TIARA", template: "%s · IMI TIARA" },
+  title: { default: "Cheri & Co.", template: "%s · Cheri & Co." },
   description: "AI Commerce & Business Operations Platform",
 };
 export const viewport: Viewport = { themeColor: "#2b2224", width: "device-width", initialScale: 1 };

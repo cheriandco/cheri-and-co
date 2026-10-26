@@ -1,4 +1,4 @@
-/* IMI TIARA design system — warm ivory / dusty rose / charcoal.
+/* Cheri & Co. design system — warm ivory / dusty rose / charcoal.
    Rose is an accent (~5–10%); surfaces stay neutral. */
 :root {
   --bg: #f8eeea;
@@ -58,6 +58,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .brand { padding: 0 10px 22px; display: flex; flex-direction: column; gap: 2px; }
 .brand-name { font-family: var(--serif); font-size: 27px; letter-spacing: 0.12em; white-space: nowrap; font-weight: 500; display: flex; align-items: center; gap: 10px; color: #f6e9e4; }
+.brand-logo { display: block; background: #f8dbdf; border-radius: 12px; padding: 4px 6px; margin-bottom: 10px; }
+.brand-logo img { display: block; width: 100%; height: auto; object-fit: contain; }
 .brand-sub { font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--side-muted); }
 .nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .nav hr { border: 0; border-top: 1px solid rgba(255, 255, 255, 0.08); margin: 10px 8px; }

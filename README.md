@@ -1,4 +1,4 @@
-# IMI TIARA — AI Commerce & Business Operations Dashboard
+# Cheri & Co. — AI Commerce & Business Operations Dashboard
 
 Next.js (App Router) + TypeScript. Plain CSS design system, no UI framework.
 
@@ -24,3 +24,7 @@ central CRM/database; the dashboard is the human-approval interface on top.
 ## Not built yet (planned phases)
 Authentication/RBAC and RLS, real Supabase persistence, agent orchestration, realtime, tests.
 Mutations (approvals, tasks, pipeline) currently persist to an in-memory store that resets on server restart.
+
+## B2C Sales Agent (prototype, Agent 1)
+
+Deterministic, rule-based agent in `src/lib/b2c-agent/` (intent → preferences → catalogue search → draft + escalation). Sample catalogue (clearly labelled, not verified) lives in `src/mocks/catalogue.ts`. UI: panel at the top of `/b2c`; API: `POST /api/agents/b2c/run`. It only drafts replies; nothing is sent, stored or connected to Instagram/Supabase/auth. Run `npm test` for the agent tests.

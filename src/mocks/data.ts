@@ -6,7 +6,7 @@ import type {
   Enquiry, Kpi, Product, Retailer, Task, TrendPoint, TrendSeries, User,
 } from "@/types";
 
-export const currentUser: User = { name: "Anika", role: "Founder · Admin", email: "anika@imitiara.com" };
+export const currentUser: User = { name: "Anika", role: "Founder · Admin", email: "anika@cheriandco.example" };
 
 export const agents: Agent[] = [
   { key: "b2c", name: "B2C Sales Agent", status: "active", lastActivity: "2 min ago", actionsToday: 64, latestAction: "Replied to Priya about gold-tone necklace" },
@@ -113,8 +113,8 @@ export const contentItems: ContentItem[] = [
 export const approvals: Approval[] = [
   { id: "a1", title: "Aurelia — Diwali Edit Reel", type: "Content", generatedBy: "content", created: "26 min ago", status: "pending", preview: "15s reel · warm studio light · soft gold flare transitions. Caption: “Layer in light this Diwali ✨”", tone: "rose" },
   { id: "a2", title: "Reply to Priya Sharma", type: "Instagram reply", generatedBy: "b2c", created: "5 min ago", status: "pending", preview: "“Yes! Aurelia is available in gold-tone. Here’s the link to order — free gift wrap this week.”", tone: "blush" },
-  { id: "a3", title: "Intro email — Mira Boutique", type: "B2B outreach", generatedBy: "b2b", created: "1 hr ago", status: "pending", preview: "Subject: Wholesale partnership with IMI TIARA — 4 stores, curated festive range…", tone: "sand" },
-  { id: "a4", title: "Aurelia A+ title rewrite", type: "Amazon listing", generatedBy: "amazon", created: "3 hr ago", status: "pending", preview: "“IMI TIARA Aurelia Layered Necklace for Women — 18k Gold-Tone, Anti-Tarnish, Gift Box”", tone: "pearl" },
+  { id: "a3", title: "Intro email — Mira Boutique", type: "B2B outreach", generatedBy: "b2b", created: "1 hr ago", status: "pending", preview: "Subject: Wholesale partnership with Cheri & Co. — 4 stores, curated festive range…", tone: "sand" },
+  { id: "a4", title: "Aurelia A+ title rewrite", type: "Amazon listing", generatedBy: "amazon", created: "3 hr ago", status: "pending", preview: "“Cheri & Co. Aurelia Layered Necklace for Women — 18k Gold-Tone, Anti-Tarnish, Gift Box”", tone: "pearl" },
   { id: "a5", title: "Reduce Moonlit Anklet to ₹599", type: "Pricing change", generatedBy: "crm", created: "Yesterday", status: "pending", preview: "Market low ₹579, ours ₹649. Predicted +18% conversion, margin stays above 42%.", tone: "sage" },
 ];
 
@@ -147,9 +147,9 @@ export const amazonPricing: AmazonPricing[] = [
 ];
 
 export const amazonListings: AmazonListing[] = [
-  { id: "al1", product: "Aurelia Layered Necklace", asin: "B0D4TIARA1", titleScore: 72, imageScore: 85, status: "needs_work" },
-  { id: "al2", product: "Pearl Drop Earrings", asin: "B0D4TIARA2", titleScore: 88, imageScore: 81, status: "live" },
-  { id: "al3", product: "Moonlit Anklet", asin: "B0D4TIARA3", titleScore: 91, imageScore: 76, status: "live" },
+  { id: "al1", product: "Aurelia Layered Necklace", asin: "B0D4CHERI1", titleScore: 72, imageScore: 85, status: "needs_work" },
+  { id: "al2", product: "Pearl Drop Earrings", asin: "B0D4CHERI2", titleScore: 88, imageScore: 81, status: "live" },
+  { id: "al3", product: "Moonlit Anklet", asin: "B0D4CHERI3", titleScore: 91, imageScore: 76, status: "live" },
   { id: "al4", product: "Rani Bridal Set", asin: "—", titleScore: 0, imageScore: 0, status: "draft" },
 ];
 
