@@ -14,7 +14,12 @@ export const viewport: Viewport = { themeColor: "#2b2224", width: "device-width"
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${serif.variable} ${sans.variable}`}>
-      <body>{children}</body>
+      <body>
+        <div className="demo-banner" role="status">
+          <span>DEMO ENVIRONMENT</span><i aria-hidden>·</i><span>SAMPLE DATA</span><i aria-hidden>·</i><span>NOT CONNECTED TO LIVE BUSINESS SYSTEMS</span>
+        </div>
+        {children}
+      </body>
     </html>
   );
 }

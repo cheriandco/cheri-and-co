@@ -102,13 +102,16 @@ export function ApprovalQueue({ initial, compact }: { initial: Approval[]; compa
               </div>
             )}
             {a.status === "pending" ? (
+              <>
+              <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>Simulated demo actions: nothing is sent, published or saved to any business record.</p>
               <div className="actions">
                 <button className="btn" onClick={() => { setText({ title: a.title, preview: a.preview, note: "" }); setDialog({ kind: "edit", item: a }); }}><Pencil size={14} /> Edit</button>
-                <button className="btn danger" onClick={() => { setText((t) => ({ ...t, note: "" })); setDialog({ kind: "reject", item: a }); }}><X size={14} /> Reject</button>
-                <button className="btn primary" disabled={busy} onClick={() => act(a, "approve", {}, { status: "approved" }, `Approved “${a.title}”`)}><Check size={14} /> Approve</button>
+                <button className="btn danger" onClick={() => { setText((t) => ({ ...t, note: "" })); setDialog({ kind: "reject", item: a }); }}><X size={14} /> Reject (demo)</button>
+                <button className="btn primary" disabled={busy} onClick={() => act(a, "approve", {}, { status: "approved" }, `Approved (demo) “${a.title}”`)}><Check size={14} /> Approve (demo)</button>
               </div>
+              </>
             ) : (
-              <p className="muted" style={{ fontSize: 12.5 }}>{a.status === "rejected" ? "Rejected — logged to the audit trail." : (a.meta ? "Approved — not published. Logged to the audit trail. Nothing is posted to any platform." : "Approved — logged to the audit trail. Nothing is sent or published automatically.")}</p>
+              <p className="muted" style={{ fontSize: 12.5 }}>{a.status === "rejected" ? "Rejected (demo) — simulated. Nothing was sent or saved." : (a.meta ? "Approved (demo) — simulated. Nothing is published or posted to any platform." : "Approved (demo) — simulated. Nothing is sent or published.")}</p>
             )}
           </div>
         </article>
@@ -116,15 +119,15 @@ export function ApprovalQueue({ initial, compact }: { initial: Approval[]; compa
 
       {dialog?.kind === "edit" && (
         <ConfirmDialog title="Edit before approving" confirmLabel="Save changes" busy={busy} onCancel={() => setDialog(null)}
-          onConfirm={() => act(dialog.item, "edit", { title: text.title, preview: text.preview }, { title: text.title, preview: text.preview }, "Changes saved")}>
+          onConfirm={() => act(dialog.item, "edit", { title: text.title, preview: text.preview }, { title: text.title, preview: text.preview }, "Changes saved (demo)")}>
           <div className="field"><label htmlFor="ed-title">Title</label><input id="ed-title" value={text.title} maxLength={200} onChange={(e) => setText({ ...text, title: e.target.value })} /></div>
           <div className="field"><label htmlFor="ed-body">Content</label><textarea id="ed-body" value={text.preview} maxLength={MAX_PREVIEW_LENGTH} onChange={(e) => setText({ ...text, preview: e.target.value })} /></div>
         </ConfirmDialog>
       )}
       {dialog?.kind === "reject" && (
-        <ConfirmDialog title="Reject this draft?" confirmLabel="Reject" danger busy={busy} onCancel={() => setDialog(null)}
-          onConfirm={() => act(dialog.item, "reject", { note: text.note || undefined }, { status: "rejected" }, "Rejected")}>
-          <p className="muted" style={{ marginBottom: 12 }}>The agent will not send or publish it. The action is recorded in the audit log.</p>
+        <ConfirmDialog title="Reject this draft?" confirmLabel="Reject (demo)" danger busy={busy} onCancel={() => setDialog(null)}
+          onConfirm={() => act(dialog.item, "reject", { note: text.note || undefined }, { status: "rejected" }, "Rejected (demo)")}>
+          <p className="muted" style={{ marginBottom: 12 }}>Simulated demo action: nothing is sent, published or saved to any business record. It is visible only in your own demo session.</p>
           <div className="field"><label htmlFor="rej">Reason (optional)</label><textarea id="rej" value={text.note} maxLength={500} onChange={(e) => setText({ ...text, note: e.target.value })} /></div>
         </ConfirmDialog>
       )}

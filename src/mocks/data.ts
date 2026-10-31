@@ -174,7 +174,7 @@ export const notifications: AppNotification[] = [
   { id: "n2", kind: "followups", title: "2 follow-ups due today", detail: "Mira Boutique, Riya Kapoor", time: "30 min ago", href: "/tasks" },
   { id: "n3", kind: "b2b", title: "New HOT B2B lead", detail: "Mira Boutique · score 86", time: "11 min ago", href: "/retailers/r1" },
   { id: "n4", kind: "amazon", title: "Amazon opportunity", detail: "Layered chain necklace scored 88", time: "1 hr ago", href: "/amazon" },
-  { id: "n5", kind: "integration", title: "Instagram token expires in 6 days", detail: "Reconnect in Settings", time: "Today", href: "/settings" },
+  { id: "n5", kind: "integration", title: "Instagram is not connected (demo)", detail: "Sample notification. No live connection exists.", time: "Today", href: "/settings" },
 ];
 
 export const brandRules: BrandRule[] = [

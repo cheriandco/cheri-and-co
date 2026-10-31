@@ -5,7 +5,7 @@ import { CONTENT_SAMPLE_NOTE, contentPacks, contentProducts } from "@/mocks/cont
 import { findProhibitedClaims } from "@/lib/content-agent/claims";
 import { runContentAgent, type ContentRunInput } from "@/lib/content-agent";
 import { renderDraft } from "@/lib/content-agent/render";
-import { store } from "./store";
+import { readStore, writableStore } from "./store";
 import type {
   Approval, AuditEntry, Conversation, Customer, DashboardSummary, Deal, PipelineStage,
   ReportSection, Retailer, Task,
@@ -19,6 +19,7 @@ const SCALED = new Set(["b2c", "b2b", "opp", "content"]);
 
 export async function getDashboardSummary(range = "7d"): Promise<DashboardSummary> {
   await tick();
+  const store = await readStore();
   const f = RANGE_FACTOR[range] ?? 1;
   return {
     kpis: m.kpis.map((k) =>
@@ -55,21 +56,21 @@ export async function getAmazon() {
   return { rows: m.amazonRows, competitors: m.amazonCompetitors, reviews: m.amazonReviews, pricing: m.amazonPricing, listings: m.amazonListings };
 }
 
-export async function getTasks(): Promise<Task[]> { await tick(); return store.tasks; }
+export async function getTasks(): Promise<Task[]> { await tick(); return (await readStore()).tasks; }
 export async function createTask(input: Pick<Task, "title" | "due" | "priority" | "assignee">): Promise<Task> {
   const t: Task = { id: `t${Date.now()}`, source: "Manual", status: "open", href: "/tasks", ...input };
-  store.tasks.unshift(t);
+  (await writableStore()).tasks.unshift(t);
   return t;
 }
 export async function updateTask(id: string, patch: Partial<Pick<Task, "status" | "due" | "assignee">>): Promise<Task | null> {
-  const t = store.tasks.find((x) => x.id === id);
+  const t = (await writableStore()).tasks.find((x) => x.id === id);
   if (!t) return null;
   Object.assign(t, patch);
   return t;
 }
 
-export async function getApprovals(): Promise<Approval[]> { await tick(); return store.approvals; }
-export async function getAuditLog(): Promise<AuditEntry[]> { return store.audit; }
+export async function getApprovals(): Promise<Approval[]> { await tick(); return (await readStore()).approvals; }
+export async function getAuditLog(): Promise<AuditEntry[]> { return (await readStore()).audit; }
 export type DecisionResult =
   | { ok: true; approval: Approval }
   | { ok: false; reason: "not_found" | "not_pending" | "prohibited_claims"; detail?: string[] };
@@ -83,6 +84,7 @@ export async function decideApproval(
   note?: string,
   edits?: { title?: string; preview?: string },
 ): Promise<DecisionResult> {
+  const store = await writableStore();
   const a = store.approvals.find((x) => x.id === id);
   if (!a) return { ok: false, reason: "not_found" };
   if (a.status !== "pending") return { ok: false, reason: "not_pending" };
@@ -115,6 +117,7 @@ export async function submitContentDraft(input: ContentRunInput): Promise<Submit
   if (draft.blocked) return { ok: false, reason: "blocked", error: "The draft has blocking issues and cannot be submitted.", draft };
   const preview = renderDraft(draft);
   const title = `${draft.subject.name} · content pack`;
+  const store = await writableStore();
   if (store.approvals.some((x) => x.status === "pending" && x.title === title && x.preview === preview))
     return { ok: false, reason: "duplicate", error: "An identical draft is already waiting for review.", draft };
   const approval: Approval = {
@@ -132,9 +135,9 @@ function contentClaimsFor(input: ContentRunInput): string[] {
   return rec ? [...rec.approvedClaims] : [];
 }
 
-export async function getDeals(): Promise<Deal[]> { await tick(); return store.deals; }
+export async function getDeals(): Promise<Deal[]> { await tick(); return (await readStore()).deals; }
 export async function moveDeal(id: string, stage: PipelineStage): Promise<Deal | null> {
-  const d = store.deals.find((x) => x.id === id);
+  const d = (await writableStore()).deals.find((x) => x.id === id);
   if (!d) return null;
   d.stage = stage;
   d.updated = "just now";
