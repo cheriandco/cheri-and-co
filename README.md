@@ -38,7 +38,7 @@ Template-based drafts (caption, hashtags, reel and ASMR scripts, stories, Canva 
 | Drafting, safeguards, approval | template drafts, claim guard, link allowlist, decide-once approvals, audit trail (in memory) | Supabase persistence, named approvers | approved claims, real catalogue, marketplace links |
 | Publishing | none; approval never posts anywhere | manual by a person | permissions, only if automation is ever wanted |
 
-Security: keys stay server-side and are not read by any code today; `.env.example` holds blank placeholders only. A moderate dev-only `minimatch` audit advisory is documented, with a tested workaround awaiting approval, in `docs/PHASE1_UI_FREEZE.md`.
+Security: keys stay server-side and are not read by any code today; `.env.example` holds blank placeholders only. The moderate dev-only `minimatch` audit advisory (GHSA-g3hv-75wg-m249) is addressed by an `overrides` entry (`minimatch ^11.0.3`) in `package.json`; `npm audit` reports 0 vulnerabilities. Details in `docs/PHASE1_UI_FREEZE.md`.
 
 ## B2C Sales Agent (prototype, Agent 1)
 

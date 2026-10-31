@@ -26,13 +26,15 @@ only acceptable to fix a clear functional inconsistency.
 | 7 | Approval, task and pipeline state is not persistent | `src/services/store.ts` (in-memory, `globalThis`) | Persist to Supabase; resets on server restart today. Audit log likewise. |
 | 8 | External integrations are not connected | Settings page lists Instagram, Supabase, Amazon, Anthropic Claude (API), Canva as not connected | Connect progressively; the services layer in `src/services` is the only place to change. |
 
-## Dependency audit finding (development tooling only)
-`npm audit` reports one moderate advisory, GHSA-g3hv-75wg-m249 (`minimatch`, denial of service through glob amplification; affected: `<11.0.1`).
+## Dependency audit finding (development tooling only) — resolved
+**Status: resolved.** The override below is applied in `package.json`; `npm audit` now reports 0 vulnerabilities, and lint, typecheck, tests and the production build pass. The notes below record the original finding.
+
+Before the override, `npm audit` reported one moderate advisory, GHSA-g3hv-75wg-m249 (`minimatch`, denial of service through glob amplification; affected: `<11.0.1`).
 - **Where:** transitive only. `minimatch` is pulled in by `eslint`, `eslint-config-next` and `typescript-eslint`; it is not a direct dependency and is not in the production runtime or the Next.js build output.
 - **Fix `npm audit` suggests:** `npm audit fix --force`, which installs `eslint@4.0.0`. That is a breaking, obsolete downgrade and is **not** used.
 - **No upstream fix yet:** the latest `eslint` (10.14.0), `eslint@9` and `@typescript-eslint/typescript-estree` (8.72.1) all depend on `minimatch` 3.x or 10.x.
-- **Tested, non-breaking workaround (not applied, needs approval):** adding `"overrides": { "minimatch": "^11.0.3" }` to `package.json`. In a scratch copy this gave 0 audit findings, with lint, typecheck and all tests passing. It does change `package.json` and the lockfile, so it waits for owner approval.
-- **Recommended:** approve the override, or wait for an eslint/typescript-eslint release that depends on `minimatch` 11 and drop it then.
+- **Applied (owner-approved), non-breaking workaround:** `"overrides": { "minimatch": "^11.0.3" }` in `package.json`, with the lockfile updated. `minimatch` now resolves to 11.0.3 everywhere; `eslint` was not downgraded.
+- **Later:** when an eslint/typescript-eslint release depends on `minimatch` 11 natively, the override can be removed.
 
 ## Other gaps (not UI)
 - No authentication, role-based access or database row-level security yet.
