@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ChevronRight } from "lucide-react";
-import { getApprovals, getBrandRules, getContent, getProducts } from "@/services";
+import { getApprovals, getBrandRules, getContent, getContentSamples, getProducts } from "@/services";
+import { ContentAgentPanel } from "@/components/content-agent-panel";
 import { PageHeader, Tabs, DashboardCard, DataTable, SectionHeader, StatusBadge, Thumb, Money, EmptyState } from "@/components/ui";
 import { ContentList } from "@/components/domain";
 import { ApprovalQueue } from "@/components/interactive";
@@ -16,16 +17,18 @@ const WORKFLOW = ["Product Library", "Brand Brain", "Content Strategy", "Content
 
 export default async function ContentPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const { tab = "overview" } = await searchParams;
-  const [content, rules, products, approvals] = await Promise.all([getContent(), getBrandRules(), getProducts(), getApprovals()]);
+  const [content, rules, products, approvals, samples] = await Promise.all([getContent(), getBrandRules(), getProducts(), getApprovals(), getContentSamples()]);
   const published = content.filter((c) => c.status === "published");
 
   return (
     <div className="stack">
       <PageHeader eyebrow="Content & Marketing Agent" title="Content & marketing" subtitle="From product to approval-ready content — no prompts to write. Your agent plans, drafts and waits for your approval." />
       <Tabs base="/content" tabs={TABS} active={tab} />
+      <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>Calendar, product, brand, asset, approval and published items other than your own drafts are demonstration data from an earlier project, not verified Cheri & Co. information. This system does not publish anything.</p>
 
       {tab === "overview" && (
         <div className="stack">
+          <ContentAgentPanel products={samples.products} packs={samples.packs} note={samples.note} />
           <DashboardCard>
             <SectionHeader title="How content gets made" />
             <ol className="flow" style={{ listStyle: "none", padding: 0, margin: 0 }}>

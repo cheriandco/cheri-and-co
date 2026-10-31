@@ -154,6 +154,14 @@ export interface ContentItem {
 
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "executed";
 
+/** Set on approvals created by the Content & Marketing Agent so the claim guard can re-check them on approval. */
+export interface ContentApprovalMeta {
+  kind: "content_draft";
+  subject: string;
+  isSample: boolean;
+  allowedClaims: string[];
+}
+
 export interface Approval {
   id: string;
   title: string;
@@ -163,6 +171,7 @@ export interface Approval {
   status: ApprovalStatus;
   preview: string;
   tone: ThumbTone;
+  meta?: ContentApprovalMeta;
 }
 
 export interface AuditEntry {

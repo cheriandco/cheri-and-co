@@ -14,7 +14,8 @@ See `docs/DATABASE.md` for the legend (confirmed / requested / assumption / open
 - Handlers call the service layer (`src/services/index.ts`) and never touch mock data directly.
 - Errors are `{ "error": "message" }`.
 - The actor for audit entries is the hardcoded string "Anika" (`TODO(auth)` in the approvals route).
-- Known behaviours to fix before any real use: the approvals route does not check the current status (a rejected approval can still be approved, and each call adds an audit entry); the `range` query parameter is not validated (unknown values behave like `7d`).
+- Approvals can only be decided while `pending`: a second decision returns `409` and writes no audit entry. (This replaces the earlier behaviour where a rejected approval could still be approved.)
+- Known behaviour to fix before any real use: the `range` query parameter is not validated (unknown values behave like `7d`).
 
 ### 1.2 Routes
 | Method & path | Purpose | Notes |
@@ -30,11 +31,13 @@ See `docs/DATABASE.md` for the legend (confirmed / requested / assumption / open
 | `PATCH /api/tasks/:id` | Update status / due / assignee | `status`: `open`/`done`/`postponed`. |
 | `PATCH /api/pipeline/:id` (alias `/api/leads/:id`) | Move a pipeline card | Body `{ "stage": <PipelineStage> }`; id is the **deal** id (`d-<retailerId>`). |
 | `GET /api/approvals` | All approvals | |
-| `POST /api/approvals/:id/approve` · `/reject` · `/edit` | Decide an approval | Optional `note` (≤500). `edit` requires `title` and/or `preview`. Every call appends an audit entry. |
+| `POST /api/approvals/:id/approve` · `/reject` · `/edit` | Decide an approval | Optional `note` (≤500). `edit` requires `title` and/or `preview` (≤6000). Each successful call appends an audit entry. `404` unknown id; `409` already decided; `422` when approving a Content draft that contains prohibited wording. Approving executes, sends and publishes nothing. |
 | `GET /api/agents/status` · `GET /api/agents/activity` | Five agents' status; activity log | |
 | `GET /api/amazon/insights` | Amazon sample tables | Inherited feature; see §4. |
 | `GET /api/reports` | Report sections | Mock numbers. |
 | `POST /api/agents/b2c/run` | Run the B2C Sales Agent prototype | Body `{ "enquiry": string }`, 1–1000 chars. Returns a `B2CAgentResult`. **Drafts only: nothing is sent, stored or logged.** `messageSent` is always `false`. |
+| `POST /api/agents/content/run` | Draft content for a SAMPLE product or pack | See §1.4. Returns `{ draft, note? }`. **Nothing is stored, sent or published.** |
+| `POST /api/agents/content/submit` | Queue a draft for human review | Same body. The server regenerates the draft, then creates a `pending` Content approval. `201`; `404` unknown target; `409` identical draft already pending; `422` blocked draft. |
 
 ### 1.3 B2C Sales Agent route contract (`POST /api/agents/b2c/run`)
 Response fields (see `src/types/b2c-agent.ts`): `enquiry`, `intent`, `intentConfidence` (0–1, rule-based, not a model
@@ -51,6 +54,29 @@ Behaviour guarantees (covered by `tests/b2c-agent.test.ts`, 35 tests):
 - Escalates order status, refunds/returns of existing orders, complaints, unclear enquiries, missing information and no-match cases to a human.
 - Prices are labelled as sample prices. All catalogue products are flagged sample data.
 - Deterministic and rule-based: no network or model call, no API key used.
+
+### 1.4 Content & Marketing Agent routes
+Body for both routes: `{ "targetType": "product" | "pack", "targetId": string, "audience"?: "everyday" | "college" | "work" | "gifting", "amazonUrl"?: string, "flipkartUrl"?: string }`.
+Links must be `https` on Amazon or Flipkart hosts (affiliate short links such as `amzn.to` and `dl.flipkart.com` included); they are used verbatim and never generated.
+The draft (`ContentDraft`, `src/types/content-agent.ts`) contains the Instagram caption, hashtags, reel script, ASMR script, three story frames, a Canva brief, the marketplace CTAs, `issues`, `blocked`, `factsUsed`, `published: false` and `status: "ai_generated"`.
+Rules enforced in code and covered by `tests/content-agent.test.ts`:
+- Drafts are template-generated from the record only. They never state prices, discounts, stock, materials or product claims unless a client-approved claim is on the record (price, discount and stock wording is never allowed, even if "approved").
+- Blocked drafts (prohibited wording, invalid link, missing name) cannot be submitted, and an edited preview is re-checked on approval.
+- Workflow: `ai_generated` → `pending_review` → `approved` | `rejected`. There is no publish state and no outbound call to Instagram, Amazon, Flipkart or any other platform.
+- Editing: a pending draft can be edited in Approvals. The edited text is re-checked on approval, so editing cannot bypass the claim guard (`422` if it now contains prohibited wording).
+- Claude drafting is **not implemented** (see "Planned Claude integration" below). The reserved flag `CONTENT_AGENT_USE_CLAUDE` (default `false`) only adds a note to the run response saying drafting is still template-based. No Anthropic key is read and no outbound call is made. The earlier GPT switch was removed.
+
+**Status of the Content agent's integrations**
+- *Implemented:* template drafting; Canva design brief as text; claim guard; link allowlist; approval workflow with audit trail; in-memory only.
+- *Planned:* Claude drafting and refinement; Canva automation; persistence in Supabase.
+- *Requires client access or approval:* Anthropic Console API key and usage billing; verified Canva plan and API/automation capability; approved claims, catalogue and marketplace links.
+
+**Planned Claude integration (design only, not built)**
+- A Claude Team subscription is not API access. Live drafting needs an Anthropic Console API key and separate usage billing, which the client must decide on and supply through a secrets manager, never in chat or source.
+- Calls stay server-side, inside the content-agent service, selected by `chooseGenerator` in `src/lib/content-agent/config.ts` when the flag is on **and** a key is configured. The browser never sees the key, and the key is never logged or returned in a response.
+- Claude output would enter the same pipeline as template output: it is a draft (`status: "ai_generated"`, `published: false`), is scanned by the claim guard and link checks, is blocked if it states a price, discount, stock level or unapproved claim, and then follows pending review, edit, approval. Claude would receive only the product or pack record and approved claims, and would be told not to add facts.
+- Claude would not be given any tool or credential able to post, send or publish.
+- Canva stays a text brief. Any Canva automation is a separate decision after the client's plan and API access are verified.
 
 ## 2. Requested in original brief (needs Cheri & Co. confirmation)
 The brief listed `GET/POST/PATCH` endpoints for leads, customers, retailers, conversations, products, content,

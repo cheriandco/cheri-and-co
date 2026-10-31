@@ -21,7 +21,7 @@ Legend used throughout `docs/DATABASE.md`, `docs/API.md` and `docs/UX_FLOWS.md`:
 | Mock data | `src/mocks/data.ts`, `src/mocks/catalogue.ts` | **Invented sample data.** Not real products, prices, people or stock. |
 | Service boundary | `src/services/index.ts` | Only place that reads mock data; designed to be re-implemented against a database. |
 | Mutable state | `src/services/store.ts` | In-memory, held on `globalThis`. **Resets on server restart.** Holds approvals, tasks, pipeline deals and the audit log. |
-| Environment | `.env.example` | `DATA_SOURCE`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY` (reserved for the planned Claude drafting; an Anthropic Console key, not a Claude Team subscription; all placeholders). **No code reads any environment variable yet.** `.env.example` also mentions `src/services/source.ts`, which does not exist. |
+| Environment | `.env.example` | `DATA_SOURCE`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY` (reserved for the planned Claude drafting; an Anthropic Console key, not a Claude Team subscription), `CONTENT_AGENT_USE_CLAUDE` (all placeholders). **The only environment variable code reads is `CONTENT_AGENT_USE_CLAUDE`, and it only adds a note; no key is read.** `.env.example` also mentions `src/services/source.ts`, which does not exist. |
 
 ### 1.2 Entities that exist as TypeScript types
 Field lists are exactly those in `src/types/index.ts`; types are the only definition, no constraints or keys exist.
@@ -46,11 +46,14 @@ Field lists are exactly those in `src/types/index.ts`; types are the only defini
 | Amazon: `AmazonRow`, `AmazonCompetitor`, `AmazonReview`, `AmazonPricing`, `AmazonListing` | see `src/types/index.ts` | No |
 | `Kpi`, `FunnelStage`, `TrendPoint`, `ReportSection` | presentation shapes computed from mock data | No |
 | `CatalogueProduct` (B2C agent) | id, name, category, style, occasions[], material?, samplePriceInr?, description, imagePath?, purchaseUrl?, availability, isSample:true | No |
+| `ContentProduct` / `ContentPack` (Content agent) | product: id, name, category?, styleTags[], materialNote?, approvedClaims[], links{amazon?,flipkart?}, isSample; pack: id, name, size (2/3/6/10), kind, memberProductIds[], packaging?, approvedClaims[], links, isSample. **No price or stock field by design.** | No (SAMPLE records in `src/mocks/content-samples.ts`) |
+| `ContentDraft` | caption, hashtags, reel/ASMR scripts, story frames, Canva brief, CTAs, issues, blocked, `published: false` | Not stored; returned per request (`generator` is always `"template"`). Submitting creates an `Approval` with `meta` (`ContentApprovalMeta`: subject, `isSample`, allowed claims). No publish status exists |
 | `B2CAgentResult` | enquiry, intent, intentConfidence, preferences, recommendations[], draftResponse, autoAnswerPermitted, escalation, suggestedNextAction, dataSource, messageSent:false | Not stored; returned per request |
 
 ### 1.3 Known weaknesses of the current model (do not copy into a schema)
 - Times and dates are display strings ("5 min ago", "08 Oct"), not timestamps. The one exception is `AuditEntry.at`, an ISO timestamp written by the server.
-- Two unrelated sample product sets exist: 5 products in `src/mocks/data.ts` (dashboard Products page) and 18 `SAMPLE-…` products in `src/mocks/catalogue.ts` (B2C agent). They are both invented and do not match each other.
+- Three unrelated sample product sets exist: 5 products in `src/mocks/data.ts` (dashboard Products page), 18 `SAMPLE-…` products in `src/mocks/catalogue.ts` (B2C agent), and 10 products plus 4 packs in `src/mocks/content-samples.ts` (Content agent). All are invented and do not match each other. Only the third reflects the confirmed single-piece and 2/3/6/10-piece pack structure.
+- Inherited sample text in `src/mocks/data.ts` was invented for the earlier project and is **not** client-approved. The "anti-tarnish", "free gift wrap" and gift-box wording has been removed; every inherited approval title is now prefixed "SAMPLE ·" and every Brand Brain rule starts "SAMPLE, not client-approved." (tests guard both). Other invented sample facts remain (product names such as "Aurelia", prices, reach figures, the Products, Published and Performance tabs); the Content page says they are demonstration data. The Content agent uses none of it.
 - `ApprovalStatus` includes `executed`, but nothing sets it today.
 - Money is a bare number with no currency field (the sample catalogue is INR by convention only).
 - Relationships are by convention: `Deal.retailerId`, `Enquiry.customerId`, `Task.href` (a URL used as a link to a record), `Approval.generatedBy`.

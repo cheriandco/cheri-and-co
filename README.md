@@ -27,6 +27,19 @@ Mutations (approvals, tasks, pipeline) currently persist to an in-memory store t
 
 Business facts and assumptions: `docs/BUSINESS_CONTEXT.md`. Content tooling is **Anthropic Claude + Canva** (no GPT, no Higgsfield).
 
+## Content & Marketing Agent (prototype)
+
+Template-based drafts (caption, hashtags, reel and ASMR scripts, stories, Canva brief) for SAMPLE products and 2/3/6/10-piece packs, in `src/lib/content-agent/`; SAMPLE data in `src/mocks/content-samples.ts`. UI: card at the top of `/content`; API: `POST /api/agents/content/run` and `/submit`. Draft-only: approval records a decision, and nothing is posted anywhere. No prices, discounts, stock, materials or claims are invented. Tests: `tests/content-agent.test.ts`.
+
+| | Implemented | Planned | Requires client access or approval |
+|---|---|---|---|
+| Claude | none (a reserved flag `CONTENT_AGENT_USE_CLAUDE`, default off, only adds a "not built" note) | server-side drafting and refinement, same claim guard and approval flow | Anthropic Console API key and usage billing. A Claude Team subscription is **not** API access |
+| Canva | design brief text in every draft | automation, only if the plan and API allow | client's Canva plan and permissions verified |
+| Drafting, safeguards, approval | template drafts, claim guard, link allowlist, decide-once approvals, audit trail (in memory) | Supabase persistence, named approvers | approved claims, real catalogue, marketplace links |
+| Publishing | none; approval never posts anywhere | manual by a person | permissions, only if automation is ever wanted |
+
+Security: keys stay server-side and are not read by any code today; `.env.example` holds blank placeholders only. A moderate dev-only `minimatch` audit advisory is documented, with a tested workaround awaiting approval, in `docs/PHASE1_UI_FREEZE.md`.
+
 ## B2C Sales Agent (prototype, Agent 1)
 
 Deterministic, rule-based agent in `src/lib/b2c-agent/` (intent → preferences → catalogue search → draft + escalation). Sample catalogue (clearly labelled, not verified) lives in `src/mocks/catalogue.ts`. UI: panel at the top of `/b2c`; API: `POST /api/agents/b2c/run`. It only drafts replies; nothing is sent, stored or connected to Instagram/Supabase/auth. Run `npm test` for the agent tests.

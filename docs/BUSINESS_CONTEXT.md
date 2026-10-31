@@ -67,3 +67,14 @@ Real catalogue (SKUs, names, prices, MRP, GST, MOQ, stock); pack definitions; pr
 brand guidelines and tone rules; languages (Hindi/Hinglish?); named approvers and escalation contacts; client's existing
 website, hosting and database; Meta/WhatsApp/Amazon/Canva approvals; an Anthropic Console account, API key and usage
 billing decision; the client's Canva plan and whether it allows API or automation access.
+
+## 5. Content & Marketing technology status
+| Area | Implemented (works today, local prototype) | Planned (not built) | Requires client access or approval |
+|---|---|---|---|
+| Drafting | Template generator: caption, hashtags, reel and ASMR scripts, stories, Canva brief, for SAMPLE products and 2/3/6/10-piece packs | Claude drafting and refinement, server-side, behind the reserved flag `CONTENT_AGENT_USE_CLAUDE` (default off) | Anthropic Console account, API key and usage billing (separate from any Claude Team plan) |
+| Design | Structured Canva design brief inside each draft | Canva automation, only if the plan and API allow it | Client's Canva plan and permissions verified |
+| Safeguards | Claim guard, link allowlist, edit re-check, decide-once approvals | Same safeguards applied to Claude output | Approved product claims and brand guidelines |
+| Approval | AI generated → Pending review → Approved / Rejected, audit trail | Persistence in Supabase, named approvers | Approver names and rules |
+| Publishing | None. Approval records a decision only | Manual publishing by a person; any automation needs separate approval | Instagram, Amazon and Flipkart permissions, if automation is ever wanted |
+| Data | SAMPLE records, in memory | Real catalogue and links | Catalogue, claims, marketplace and affiliate links |
+| Workflow automation | None | n8n, as integrations are added | Hosting and access decisions |

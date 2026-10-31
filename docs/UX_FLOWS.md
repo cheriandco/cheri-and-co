@@ -21,13 +21,21 @@ insights, tasks. All numbers are mock.
 `AI generated → Pending review → Approve / Reject / Edit → Execute → Completed`.
 Implemented: pending review, approve, reject (confirmation with optional reason), edit, and an audit trail list.
 **Not implemented:** the Execute and Completed steps (approval only changes status; nothing is executed or sent) and
-persistence (state resets on server restart).
+persistence (state resets on server restart). An item can only be decided once while it is pending.
 
 ### 1.4 B2C Sales Agent prototype (`/b2c`)
 Panel above the filters: type a customer enquiry → "Run agent (simulated)" → shows the intent, a draft reply, the
 sample-catalogue recommendations, whether it escalated to a human and why, and a suggested next action.
 Labelled "Prototype · sample data" and "Not sent". Below it: the (mock) conversation list and filters.
 Error and validation states exist (empty input, over 1000 characters, network/server failure).
+
+### 1.4a Content & Marketing Agent prototype (`/content`, Overview tab)
+Card above the workflow strip: choose a SAMPLE product or 2/3/6/10-piece combo pack, an audience (everyday, college, working professionals, gifting) and optional Amazon/Flipkart links → "Draft content (simulated)".
+The draft shows an Instagram caption, hashtags, a reel script, an ASMR script, three story frames and a Canva design brief, plus review notes (missing links, SAMPLE data), the facts used, and an "AI generated / Not published" badge.
+"Send to review queue" creates a **Pending review** item in Approvals; Approve and Reject only record a decision (Approved / Rejected). The Content approval strip stops at the decision: nothing is executed or published, and nothing is posted to any platform.
+Prices, discounts, stock, materials and product claims are never invented; blocked drafts cannot be submitted. Everything is labelled SAMPLE until the client supplies a real catalogue, claims and links.
+Labels on screen, in order: **SAMPLE data** (not client-verified) → **AI generated** draft → **Pending review** → **Approved / Rejected**, with **Not published** shown throughout. Content approvals in Approvals carry the same badges. A pending item can be edited there; the edit is re-checked on approval. The page subtitle reads "From product to approval-ready content".
+Drafting is template-based. Claude drafting is planned (reserved flag, off, not built; needs an Anthropic Console API key) and Canva is brief-only; the Settings page shows both as not connected.
 
 ### 1.5 Other flows
 - **CRM** (`/crm`, 7 tabs) including a drag-and-drop pipeline board (also keyboard-operable via a hidden select). Moves call `PATCH /api/pipeline/:id`; in-memory only.
@@ -49,7 +57,7 @@ Each item below was specified for IMI TIARA and is **not approved** for Cheri & 
 2. Instagram as the B2C enquiry channel.
 3. Amazon and Flipkart click/purchase tracking and an Amazon Intelligence workflow.
 4. B2B retailer lead discovery and a sales pipeline (New → Qualified → Contacted → Interested → Negotiation → Won → Lost).
-5. Content workflow: Product Library → Brand Brain → Strategy → Calendar → Claude Creative Brain → Creative Generation → Canva Design → Human Approval → Publish/Export → Performance. (Content tooling is Claude + Canva, per the client; GPT and Higgsfield are not used. The strip labels Claude as planned, Canva as brief-only and publishing as manual.)
+5. Content workflow: Product Library → Brand Brain → Strategy → Calendar → Claude Creative Brain → Creative Generation → Canva Design → Human Approval → Publish/Export → Performance. (Content tooling is Claude + Canva, per the client; GPT and Higgsfield are not used. Today only template drafting and Canva briefs exist; the strip labels Claude as planned, Canva as brief-only and publishing as manual.)
 6. Roles and sign-in, notification centre, reports by area.
 
 ## 4. Assumptions

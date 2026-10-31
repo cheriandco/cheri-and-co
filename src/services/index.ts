@@ -1,11 +1,16 @@
 /** Service boundary. Pages and API routes call these; components never touch
  *  mock data. To move to Supabase, re-implement the bodies here only. */
 import * as m from "@/mocks/data";
+import { CONTENT_SAMPLE_NOTE, contentPacks, contentProducts } from "@/mocks/content-samples";
+import { findProhibitedClaims } from "@/lib/content-agent/claims";
+import { runContentAgent, type ContentRunInput } from "@/lib/content-agent";
+import { renderDraft } from "@/lib/content-agent/render";
 import { store } from "./store";
 import type {
   Approval, AuditEntry, Conversation, Customer, DashboardSummary, Deal, PipelineStage,
   ReportSection, Retailer, Task,
 } from "@/types";
+import type { ContentDraft } from "@/types/content-agent";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -65,20 +70,66 @@ export async function updateTask(id: string, patch: Partial<Pick<Task, "status" 
 
 export async function getApprovals(): Promise<Approval[]> { await tick(); return store.approvals; }
 export async function getAuditLog(): Promise<AuditEntry[]> { return store.audit; }
+export type DecisionResult =
+  | { ok: true; approval: Approval }
+  | { ok: false; reason: "not_found" | "not_pending" | "prohibited_claims"; detail?: string[] };
+
+/** Records a human decision. Only pending approvals can be decided, and failed attempts write no audit entry.
+ *  Approving never executes, sends or publishes anything: status simply becomes "approved". */
 export async function decideApproval(
   id: string,
   action: "approve" | "reject" | "edit",
   actor: string,
   note?: string,
   edits?: { title?: string; preview?: string },
-): Promise<Approval | null> {
+): Promise<DecisionResult> {
   const a = store.approvals.find((x) => x.id === id);
-  if (!a) return null;
+  if (!a) return { ok: false, reason: "not_found" };
+  if (a.status !== "pending") return { ok: false, reason: "not_pending" };
+  if (action === "approve" && a.meta?.kind === "content_draft") {
+    const violations = findProhibitedClaims(a.preview, a.meta.allowedClaims);
+    if (violations.length) return { ok: false, reason: "prohibited_claims", detail: violations.map((v) => `${v.label}: "${v.match}"`) };
+  }
   if (action === "approve") a.status = "approved";
   if (action === "reject") a.status = "rejected";
   if (action === "edit") Object.assign(a, edits);
   store.audit.push({ id: `au${Date.now()}`, approvalId: id, action, actor, at: new Date().toISOString(), note });
-  return a;
+  return { ok: true, approval: a };
+}
+
+export async function getContentSamples() {
+  await tick();
+  return { products: contentProducts, packs: contentPacks, note: CONTENT_SAMPLE_NOTE };
+}
+
+export type SubmitResult =
+  | { ok: true; approval: Approval; draft: ContentDraft }
+  | { ok: false; reason: "invalid" | "blocked" | "duplicate"; error: string; draft?: ContentDraft };
+
+/** Regenerates the draft on the server (the browser's copy is never trusted) and queues it as "Pending review".
+ *  Nothing is published: the queue entry is a request for a human decision. */
+export async function submitContentDraft(input: ContentRunInput): Promise<SubmitResult> {
+  const run = runContentAgent(input, contentProducts, contentPacks);
+  if (!run.ok) return { ok: false, reason: "invalid", error: run.error };
+  const { draft } = run;
+  if (draft.blocked) return { ok: false, reason: "blocked", error: "The draft has blocking issues and cannot be submitted.", draft };
+  const preview = renderDraft(draft);
+  const title = `${draft.subject.name} · content pack`;
+  if (store.approvals.some((x) => x.status === "pending" && x.title === title && x.preview === preview))
+    return { ok: false, reason: "duplicate", error: "An identical draft is already waiting for review.", draft };
+  const approval: Approval = {
+    id: `a-${crypto.randomUUID().slice(0, 8)}`, title, type: "Content", generatedBy: "content", created: "just now",
+    status: "pending", preview, tone: "rose",
+    meta: { kind: "content_draft", subject: draft.subject.name, isSample: draft.subject.isSample, allowedClaims: contentClaimsFor(input) },
+  };
+  store.approvals.unshift(approval);
+  return { ok: true, approval, draft };
+}
+
+function contentClaimsFor(input: ContentRunInput): string[] {
+  const t = input.target;
+  const rec = t.type === "product" ? contentProducts.find((x) => x.id === t.id) : contentPacks.find((x) => x.id === t.id);
+  return rec ? [...rec.approvedClaims] : [];
 }
 
 export async function getDeals(): Promise<Deal[]> { await tick(); return store.deals; }

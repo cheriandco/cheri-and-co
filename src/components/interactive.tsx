@@ -7,6 +7,7 @@ import { Check, ChevronRight, Pencil, X } from "lucide-react";
 import { EmptyState, StatusBadge, Thumb, Avatar } from "./ui";
 import { AGENT_NAMES, STAGE_LABELS } from "@/lib/agents";
 import { STAGES } from "@/lib/validate";
+import { MAX_PREVIEW_LENGTH } from "@/lib/content-agent/render";
 import type { Approval, Deal, PipelineStage, Task } from "@/types";
 
 async function send(url: string, method: string, body?: unknown): Promise<boolean> {
@@ -43,6 +44,9 @@ export function ConfirmDialog({ title, children, confirmLabel, danger, onConfirm
 
 const FLOW = ["AI generated", "Pending review", "Approve / Reject", "Execute", "Completed"];
 const flowIndex = (s: Approval["status"]) => (s === "pending" ? 1 : s === "approved" ? 3 : s === "executed" ? 4 : 2);
+/** Content approvals record a decision only: nothing is executed or published, so the strip stops at the decision. */
+const CONTENT_FLOW = ["AI generated", "Pending review", "Approved / Rejected"];
+const contentFlowIndex = (s: Approval["status"]) => (s === "pending" ? 1 : 2);
 
 export function ApprovalQueue({ initial, compact }: { initial: Approval[]; compact?: boolean }) {
   const [items, setItems] = useState(initial);
@@ -81,12 +85,20 @@ export function ApprovalQueue({ initial, compact }: { initial: Approval[]; compa
               </div>
               <StatusBadge status={a.status === "approved" ? "approved" : a.status} />
             </div>
-            <p className="preview">{a.preview}</p>
+            {a.meta && (
+              <div className="row" style={{ flexWrap: "wrap", gap: 8, margin: "8px 0" }}>
+                <span className="badge info">AI-generated draft</span>
+                <span className={`badge ${a.meta.isSample ? "champagne" : "plain"}`}>{a.meta.isSample ? "SAMPLE data · not client-verified" : "Client record"}</span>
+                <span className="badge plain">Not published</span>
+              </div>
+            )}
+            <p className="preview" style={a.meta ? { whiteSpace: "pre-wrap" } : undefined}>{a.preview}</p>
             {!compact && (
               <div className="flow" style={{ marginBottom: 14 }} aria-label="Approval workflow">
-                {FLOW.map((f, i) => (
-                  <span key={f} className={i === flowIndex(a.status) ? "on" : ""} aria-current={i === flowIndex(a.status) ? "step" : undefined}>{f}</span>
-                ))}
+                {(a.type === "Content" ? CONTENT_FLOW : FLOW).map((f, i) => {
+                  const on = i === (a.type === "Content" ? contentFlowIndex(a.status) : flowIndex(a.status));
+                  return <span key={f} className={on ? "on" : ""} aria-current={on ? "step" : undefined}>{f}</span>;
+                })}
               </div>
             )}
             {a.status === "pending" ? (
@@ -96,7 +108,7 @@ export function ApprovalQueue({ initial, compact }: { initial: Approval[]; compa
                 <button className="btn primary" disabled={busy} onClick={() => act(a, "approve", {}, { status: "approved" }, `Approved “${a.title}”`)}><Check size={14} /> Approve</button>
               </div>
             ) : (
-              <p className="muted" style={{ fontSize: 12.5 }}>{a.status === "rejected" ? "Rejected — logged to the audit trail." : "Approved — queued for execution and logged to the audit trail."}</p>
+              <p className="muted" style={{ fontSize: 12.5 }}>{a.status === "rejected" ? "Rejected — logged to the audit trail." : (a.meta ? "Approved — not published. Logged to the audit trail. Nothing is posted to any platform." : "Approved — logged to the audit trail. Nothing is sent or published automatically.")}</p>
             )}
           </div>
         </article>
@@ -106,7 +118,7 @@ export function ApprovalQueue({ initial, compact }: { initial: Approval[]; compa
         <ConfirmDialog title="Edit before approving" confirmLabel="Save changes" busy={busy} onCancel={() => setDialog(null)}
           onConfirm={() => act(dialog.item, "edit", { title: text.title, preview: text.preview }, { title: text.title, preview: text.preview }, "Changes saved")}>
           <div className="field"><label htmlFor="ed-title">Title</label><input id="ed-title" value={text.title} maxLength={200} onChange={(e) => setText({ ...text, title: e.target.value })} /></div>
-          <div className="field"><label htmlFor="ed-body">Content</label><textarea id="ed-body" value={text.preview} maxLength={2000} onChange={(e) => setText({ ...text, preview: e.target.value })} /></div>
+          <div className="field"><label htmlFor="ed-body">Content</label><textarea id="ed-body" value={text.preview} maxLength={MAX_PREVIEW_LENGTH} onChange={(e) => setText({ ...text, preview: e.target.value })} /></div>
         </ConfirmDialog>
       )}
       {dialog?.kind === "reject" && (
