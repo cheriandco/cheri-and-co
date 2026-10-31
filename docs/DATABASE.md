@@ -21,7 +21,7 @@ Legend used throughout `docs/DATABASE.md`, `docs/API.md` and `docs/UX_FLOWS.md`:
 | Mock data | `src/mocks/data.ts`, `src/mocks/catalogue.ts` | **Invented sample data.** Not real products, prices, people or stock. |
 | Service boundary | `src/services/index.ts` | Only place that reads mock data; designed to be re-implemented against a database. |
 | Mutable state | `src/services/store.ts` | In-memory, held on `globalThis`. **Resets on server restart.** Holds approvals, tasks, pipeline deals and the audit log. |
-| Environment | `.env.example` | `DATA_SOURCE`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY` (all placeholders). **No code reads any environment variable yet.** `.env.example` also mentions `src/services/source.ts`, which does not exist. |
+| Environment | `.env.example` | `DATA_SOURCE`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY` (reserved for the planned Claude drafting; an Anthropic Console key, not a Claude Team subscription; all placeholders). **No code reads any environment variable yet.** `.env.example` also mentions `src/services/source.ts`, which does not exist. |
 
 ### 1.2 Entities that exist as TypeScript types
 Field lists are exactly those in `src/types/index.ts`; types are the only definition, no constraints or keys exist.
@@ -79,7 +79,7 @@ agent runs, agent actions, recommendations, brand assets, follow-ups as a separa
 ## 4. Open questions (client decisions needed before any schema)
 1. Which entities does Cheri & Co. actually need on day one? (Customers? B2B retailers? Both?)
 2. Who are the users and what roles/permissions exist (owner, staff, read-only)?
-3. Is there a real product catalogue? Source of truth (spreadsheet, Shopify, other)? Do products have variants and images?
+3. Is there a real product catalogue? Source of truth (spreadsheet, Shopify, other)? Do products have variants and images? The owner confirmed single pieces and 2/3/6/10-piece combo packs (`docs/BUSINESS_CONTEXT.md`), so the model must represent packs and their member pieces; exact pack rules are unconfirmed.
 4. Currency and tax handling for prices.
 5. Is stock tracked in this system, or elsewhere? (The B2C agent currently never states stock.)
 6. What customer data may be stored (names, phone, email, Instagram handle) and what are the consent and retention rules?

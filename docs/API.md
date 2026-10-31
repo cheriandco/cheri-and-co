@@ -50,7 +50,7 @@ Behaviour guarantees (covered by `tests/b2c-agent.test.ts`, 35 tests):
 - Never states live stock, order status, delivery promises, discounts, return terms or purchase links; it says the information is unavailable.
 - Escalates order status, refunds/returns of existing orders, complaints, unclear enquiries, missing information and no-match cases to a human.
 - Prices are labelled as sample prices. All catalogue products are flagged sample data.
-- Deterministic and rule-based: no network or model call, no OpenAI key used.
+- Deterministic and rule-based: no network or model call, no API key used.
 
 ## 2. Requested in original brief (needs Cheri & Co. confirmation)
 The brief listed `GET/POST/PATCH` endpoints for leads, customers, retailers, conversations, products, content,
@@ -61,7 +61,7 @@ covers the reads; gaps are in §3.
 - No `POST`/`PATCH /api/leads`, no `POST` for customers/retailers/conversations/products.
 - No `GET /api/conversations/:id`; no pagination, sorting or filtering parameters (the brief asked for pagination and server-side filtering).
 - No `GET /api/agents/runs` or action endpoints; no orchestration.
-- No webhook or inbound endpoints (Instagram, Amazon, Higgsfield).
+- No webhook or inbound endpoints (Instagram, Amazon, Flipkart).
 
 ## 4. Assumptions
 1. Auth will use session-based identity so the actor is derived server-side, never from the request body.

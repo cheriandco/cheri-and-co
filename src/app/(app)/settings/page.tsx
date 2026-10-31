@@ -6,7 +6,8 @@ export const metadata: Metadata = { title: "Settings" };
 
 const INTEGRATIONS = [
   ["Instagram", "Expires in 6 days", "champagne"], ["Supabase (CRM database)", "Not connected — mock data active", ""],
-  ["Amazon Seller data", "Not connected", ""], ["Higgsfield", "Not connected", ""],
+  ["Amazon Seller data", "Not connected", ""], ["Anthropic Claude (API)", "Not connected — drafts use templates. Needs an Anthropic Console API key; a Claude Team plan alone is not API access", ""],
+  ["Canva", "Not connected — design briefs only", ""],
 ];
 
 export default async function SettingsPage() {

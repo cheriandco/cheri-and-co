@@ -12,7 +12,7 @@ const TABS = [
   ["assets", "Creative Assets"], ["approvals", "Approvals"], ["published", "Published"], ["performance", "Performance"],
 ].map(([id, label]) => ({ id, label }));
 
-const WORKFLOW = ["Product Library", "Brand Brain", "Content Strategy", "Content Calendar", "GPT Creative Brain", "Creative Generation", "Higgsfield", "Human Approval", "Publish / Export", "Performance"];
+const WORKFLOW = ["Product Library", "Brand Brain", "Content Strategy", "Content Calendar", "Claude Creative Brain (planned)", "Creative Generation", "Canva Design (brief only)", "Human Approval", "Manual Publish (not automated)", "Performance"];
 
 export default async function ContentPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const { tab = "overview" } = await searchParams;
@@ -21,7 +21,7 @@ export default async function ContentPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="stack">
-      <PageHeader eyebrow="Content & Marketing Agent" title="Content & marketing" subtitle="From product to published post — no prompts to write. Your agent plans, creates and waits for your approval." />
+      <PageHeader eyebrow="Content & Marketing Agent" title="Content & marketing" subtitle="From product to approval-ready content — no prompts to write. Your agent plans, drafts and waits for your approval." />
       <Tabs base="/content" tabs={TABS} active={tab} />
 
       {tab === "overview" && (

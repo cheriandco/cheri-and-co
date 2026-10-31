@@ -25,6 +25,8 @@ central CRM/database; the dashboard is the human-approval interface on top.
 Authentication/RBAC and RLS, real Supabase persistence, agent orchestration, realtime, tests.
 Mutations (approvals, tasks, pipeline) currently persist to an in-memory store that resets on server restart.
 
+Business facts and assumptions: `docs/BUSINESS_CONTEXT.md`. Content tooling is **Anthropic Claude + Canva** (no GPT, no Higgsfield).
+
 ## B2C Sales Agent (prototype, Agent 1)
 
 Deterministic, rule-based agent in `src/lib/b2c-agent/` (intent → preferences → catalogue search → draft + escalation). Sample catalogue (clearly labelled, not verified) lives in `src/mocks/catalogue.ts`. UI: panel at the top of `/b2c`; API: `POST /api/agents/b2c/run`. It only drafts replies; nothing is sent, stored or connected to Instagram/Supabase/auth. Run `npm test` for the agent tests.

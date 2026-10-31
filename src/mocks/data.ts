@@ -111,11 +111,11 @@ export const contentItems: ContentItem[] = [
 ];
 
 export const approvals: Approval[] = [
-  { id: "a1", title: "Aurelia — Diwali Edit Reel", type: "Content", generatedBy: "content", created: "26 min ago", status: "pending", preview: "15s reel · warm studio light · soft gold flare transitions. Caption: “Layer in light this Diwali ✨”", tone: "rose" },
-  { id: "a2", title: "Reply to Priya Sharma", type: "Instagram reply", generatedBy: "b2c", created: "5 min ago", status: "pending", preview: "“Yes! Aurelia is available in gold-tone. Here’s the link to order — free gift wrap this week.”", tone: "blush" },
-  { id: "a3", title: "Intro email — Mira Boutique", type: "B2B outreach", generatedBy: "b2b", created: "1 hr ago", status: "pending", preview: "Subject: Wholesale partnership with Cheri & Co. — 4 stores, curated festive range…", tone: "sand" },
-  { id: "a4", title: "Aurelia A+ title rewrite", type: "Amazon listing", generatedBy: "amazon", created: "3 hr ago", status: "pending", preview: "“Cheri & Co. Aurelia Layered Necklace for Women — 18k Gold-Tone, Anti-Tarnish, Gift Box”", tone: "pearl" },
-  { id: "a5", title: "Reduce Moonlit Anklet to ₹599", type: "Pricing change", generatedBy: "crm", created: "Yesterday", status: "pending", preview: "Market low ₹579, ours ₹649. Predicted +18% conversion, margin stays above 42%.", tone: "sage" },
+  { id: "a1", title: "SAMPLE · Aurelia — Diwali Edit Reel", type: "Content", generatedBy: "content", created: "26 min ago", status: "pending", preview: "15s reel · warm studio light · soft gold flare transitions. Caption: “Layer in light this Diwali ✨”", tone: "rose" },
+  { id: "a2", title: "SAMPLE · Reply to Priya Sharma", type: "Instagram reply", generatedBy: "b2c", created: "5 min ago", status: "pending", preview: "“Thanks for asking! [Product details and order link to be supplied by the client.]” (SAMPLE draft)", tone: "blush" },
+  { id: "a3", title: "SAMPLE · Intro email — Mira Boutique", type: "B2B outreach", generatedBy: "b2b", created: "1 hr ago", status: "pending", preview: "Subject: Wholesale partnership with Cheri & Co. — 4 stores, curated festive range…", tone: "sand" },
+  { id: "a4", title: "SAMPLE · Aurelia A+ title rewrite", type: "Amazon listing", generatedBy: "amazon", created: "3 hr ago", status: "pending", preview: "“Cheri & Co. Aurelia Layered Necklace for Women — [material and features to be supplied by the client]” (SAMPLE draft)", tone: "pearl" },
+  { id: "a5", title: "SAMPLE · Reduce Moonlit Anklet to ₹599", type: "Pricing change", generatedBy: "crm", created: "Yesterday", status: "pending", preview: "Market low ₹579, ours ₹649. Predicted +18% conversion, margin stays above 42%.", tone: "sage" },
 ];
 
 export const amazonRows: AmazonRow[] = [
@@ -178,8 +178,8 @@ export const notifications: AppNotification[] = [
 ];
 
 export const brandRules: BrandRule[] = [
-  { id: "br1", title: "Voice", detail: "Warm, graceful and confident. Never pushy, never slangy." },
-  { id: "br2", title: "Palette", detail: "Blush, ivory, dusty rose and warm gold. Avoid neon and heavy black." },
-  { id: "br3", title: "Photography", detail: "Soft natural light, minimal props, jewellery as hero." },
-  { id: "br4", title: "Claims", detail: "Never say “real gold”. Use “gold-tone” and “anti-tarnish”." },
+  { id: "br1", title: "Voice", detail: "SAMPLE, not client-approved. Warm, graceful and confident. Never pushy, never slangy." },
+  { id: "br2", title: "Palette", detail: "SAMPLE, not client-approved. Blush, ivory, dusty rose and warm gold. Avoid neon and heavy black." },
+  { id: "br3", title: "Photography", detail: "SAMPLE, not client-approved. Soft natural light, minimal props, jewellery as hero." },
+  { id: "br4", title: "Claims", detail: "SAMPLE, not client-approved. No material, plating or durability claims until the client approves the wording." },
 ];

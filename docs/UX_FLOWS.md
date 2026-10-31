@@ -36,12 +36,12 @@ Error and validation states exist (empty input, over 1000 characters, network/se
 - **Amazon** (8 tabs), **Content** (8 tabs with workflow strip), **Reports** (7 sections), **Products**, **Settings**: read-only mock views.
 - The date selector's "Custom" option does nothing yet.
 
-## 2. Approved business requirements for Cheri & Co.
-**None recorded from the client.** Inputs received so far are from the project owner: the Cheri & Co. logo, the
-instruction to build locally first, the requirement that the client owns the infrastructure, and a statement that the
-"approved business architecture" has five agents plus an orchestrator. That statement is evidence of the owner's
-intent, but no client confirmation of agent scope has been recorded, so the agents below stay under client review.
-No Cheri & Co. product, policy or process requirement has been supplied.
+## 2. Business requirements for Cheri & Co.
+Business facts (jewellery categories, single and 2/3/6/10-piece packs, audience, Amazon/Flipkart-first model with
+Instagram redirects, B2B retailers, Claude + Canva for content, human-sent WhatsApp) were stated by the owner on 2026-10-29
+and are recorded in `docs/BUSINESS_CONTEXT.md`, with assumptions kept separate. The owner also describes five agents plus
+an orchestrator as the approved architecture; client confirmation of agent scope is still not recorded, so the agents below
+stay under review. **No catalogue, price, policy, approver or process document has been supplied.**
 
 ## 3. Requested in original brief (inherited; requires client confirmation)
 Each item below was specified for IMI TIARA and is **not approved** for Cheri & Co. until confirmed:
@@ -49,7 +49,7 @@ Each item below was specified for IMI TIARA and is **not approved** for Cheri & 
 2. Instagram as the B2C enquiry channel.
 3. Amazon and Flipkart click/purchase tracking and an Amazon Intelligence workflow.
 4. B2B retailer lead discovery and a sales pipeline (New → Qualified → Contacted → Interested → Negotiation → Won → Lost).
-5. Content workflow: Product Library → Brand Brain → Strategy → Calendar → GPT Creative Brain → Creative Generation → Higgsfield → Human Approval → Publish/Export → Performance.
+5. Content workflow: Product Library → Brand Brain → Strategy → Calendar → Claude Creative Brain → Creative Generation → Canva Design → Human Approval → Publish/Export → Performance. (Content tooling is Claude + Canva, per the client; GPT and Higgsfield are not used. The strip labels Claude as planned, Canva as brief-only and publishing as manual.)
 6. Roles and sign-in, notification centre, reports by area.
 
 ## 4. Assumptions
@@ -61,7 +61,7 @@ Each item below was specified for IMI TIARA and is **not approved** for Cheri & 
 1. Which of the five agents does Cheri & Co. want first, and in what order? Is B2B relevant at all?
 2. Is Instagram the right customer channel? Which others (WhatsApp, website chat, email)?
 3. Does Cheri & Co. sell on Amazon and/or Flipkart? Is marketplace intelligence in scope?
-4. Is Higgsfield (or any image/video generator) approved, and under which account?
+4. Will the client create an Anthropic Console account and API key with usage billing (a Claude Team plan alone is not API access)? Which Canva plan is used, and does it allow the automation we need? (GPT and Higgsfield are out of scope.)
 5. Policies the agent must reflect: returns/exchanges, shipping and delivery, discounts and offers, care instructions. Until supplied, the agent states that verified information is unavailable and escalates.
 6. Who handles escalations, during what hours, and what response time is expected?
 7. Brand voice, tone and claims rules for replies (e.g. terms that must not be used).
