@@ -1,3 +1,4 @@
+import { deny } from "@/lib/auth/access";
 import { NextResponse } from "next/server";
 import { queueAgentAction, type QueueAgent } from "@/services";
 import { readJson, str } from "@/lib/validate";
@@ -6,6 +7,8 @@ const AGENTS: QueueAgent[] = ["b2c", "b2b", "amazon"];
 
 /** POST /api/agent-actions {agent, ref}. Queues the agent's suggestion in Approvals. Sends, posts and changes nothing. */
 export async function POST(req: Request) {
+  const denied = await deny("agents:run", req);
+  if (denied) return denied;
   const body = await readJson(req);
   const agent = body?.agent;
   const ref = str(body?.ref, 80);

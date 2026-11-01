@@ -1,3 +1,4 @@
+import { deny } from "@/lib/auth/access";
 import { NextResponse } from "next/server";
 import * as s from "@/services";
 import { isStage, readJson, str } from "@/lib/validate";
@@ -5,6 +6,8 @@ import { isStage, readJson, str } from "@/lib/validate";
 type Ctx = { params: Promise<{ resource: string; id: string }> };
 
 export async function GET(_req: Request, ctx: Ctx) {
+  const denied = await deny("data:read", _req);
+  if (denied) return denied;
   const { resource, id } = await ctx.params;
   const row =
     resource === "customers" ? await s.getCustomer(id)
@@ -15,6 +18,8 @@ export async function GET(_req: Request, ctx: Ctx) {
 }
 
 export async function PATCH(req: Request, ctx: Ctx) {
+  const denied = await deny("pipeline:write", req);
+  if (denied) return denied;
   const { resource, id } = await ctx.params;
   const body = await readJson(req);
   if (!body) return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });

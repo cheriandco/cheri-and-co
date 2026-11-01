@@ -6,8 +6,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   BarChart3, Bell, Building2, CheckCircle2, ChevronDown, ClipboardList, Gem, LayoutDashboard,
-  Megaphone, Menu, MessageCircleHeart, Search, Settings, ShoppingBag, Store, Users, UsersRound, X,
+  LogOut, Megaphone, Menu, MessageCircleHeart, Search, Settings, ShoppingBag, Store, Users, UsersRound, X,
 } from "lucide-react";
+import { signOutAction } from "@/app/login/actions";
 import { Avatar } from "./ui";
 import type { AppNotification, User } from "@/types";
 
@@ -33,8 +34,10 @@ const NAV = [
 
 interface SearchItem { label: string; hint: string; href: string }
 
-export function AppShell({ user, notifications, searchIndex, pending, children }: {
-  user: User; notifications: AppNotification[]; searchIndex: SearchItem[]; pending: number; children: ReactNode;
+export function AppShell({ user, notifications, searchIndex, pending, canSignOut = false, children }: {
+  user: User; notifications: AppNotification[]; searchIndex: SearchItem[]; pending: number;
+  /** True only when sign-in is required; the public demo has no session to end. */
+  canSignOut?: boolean; children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
@@ -70,6 +73,11 @@ export function AppShell({ user, notifications, searchIndex, pending, children }
           <Avatar name={user.name} />
           <div className="who"><b>{user.name}</b><span>{user.role}</span></div>
           <button aria-label="Account menu" title="Account menu"><ChevronDown size={16} /></button>
+          {canSignOut && (
+            <form action={signOutAction} style={{ display: "contents" }}>
+              <button type="submit" aria-label="Sign out" title="Sign out"><LogOut size={16} /></button>
+            </form>
+          )}
         </div>
       </aside>
       {open && <div className="scrim" onClick={() => setOpen(false)} aria-hidden />}

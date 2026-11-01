@@ -1,14 +1,19 @@
+import { deny } from "@/lib/auth/access";
 import { NextResponse } from "next/server";
 import { addDiscoveredRetailer, getDiscovery } from "@/services";
 import { readJson, str } from "@/lib/validate";
 
 /** GET /api/b2b/discover. A fixed list of SAMPLE candidates with rule-based fit scores. No search is run anywhere. */
 export async function GET() {
+  const denied = await deny("data:read");
+  if (denied) return denied;
   return NextResponse.json({ data: await getDiscovery() });
 }
 
 /** POST /api/b2b/discover {id}. Adds a SAMPLE candidate to this visitor's private leads. */
 export async function POST(req: Request) {
+  const denied = await deny("pipeline:write", req);
+  if (denied) return denied;
   const id = str((await readJson(req))?.id, 40);
   if (!id) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   const res = await addDiscoveredRetailer(id);

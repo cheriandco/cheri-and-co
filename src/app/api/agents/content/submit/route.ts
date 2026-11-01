@@ -1,3 +1,4 @@
+import { deny } from "@/lib/auth/access";
 import { NextResponse } from "next/server";
 import { submitContentDraft } from "@/services";
 import { parseRunInput } from "@/lib/content-agent";
@@ -5,6 +6,8 @@ import { readJson } from "@/lib/validate";
 
 /** POST /api/agents/content/submit. Queues a regenerated draft as a "Pending review" approval. Publishes nothing. */
 export async function POST(req: Request) {
+  const denied = await deny("content:submit", req);
+  if (denied) return denied;
   const parsed = parseRunInput(await readJson(req));
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
   const res = await submitContentDraft(parsed.input);

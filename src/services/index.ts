@@ -1,6 +1,9 @@
 /** Service boundary. Pages and API routes call these; components never touch
  *  mock data. To move to Supabase, re-implement the bodies here only. */
 import * as m from "@/mocks/data";
+import { authRequired } from "@/lib/auth/mode";
+import { ROLE_LABEL } from "@/lib/auth/roles";
+import { getAuthUser } from "@/lib/auth/session";
 import { CONTENT_SAMPLE_NOTE, contentPacks, contentProducts } from "@/mocks/content-samples";
 import { findProhibitedClaims } from "@/lib/content-agent/claims";
 import { runContentAgent, type ContentRunInput } from "@/lib/content-agent";
@@ -43,7 +46,11 @@ export async function getDashboardSummary(range = "7d"): Promise<DashboardSummar
   };
 }
 
-export async function getCurrentUser() { return m.currentUser; }
+export async function getCurrentUser() {
+  if (!authRequired()) return m.currentUser;
+  const u = await getAuthUser();
+  return { name: u?.name ?? "Guest", role: u?.role ? ROLE_LABEL[u.role] : "No role assigned", email: u?.email ?? "" };
+}
 export async function getAgents() { await tick(); return m.agents; }
 export async function getEnquiries() { await tick(); return m.enquiries; }
 export async function getConversations(): Promise<Conversation[]> { await tick(); return m.conversations; }

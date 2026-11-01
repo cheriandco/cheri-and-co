@@ -1,3 +1,4 @@
+import { deny } from "@/lib/auth/access";
 import { NextResponse } from "next/server";
 import { simulatePublishSocialPost, submitSocialPost, updateSocialPost, type SocialResult } from "@/services";
 import { parsePostInput } from "@/lib/social/posts";
@@ -12,6 +13,8 @@ function respond(res: SocialResult) {
 
 /** POST /api/social/posts/:id/(edit|submit|publish). All simulated: nothing is posted to any platform. */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string; action: string }> }) {
+  const denied = await deny("content:submit", req);
+  if (denied) return denied;
   const { id, action } = await ctx.params;
   if (action === "submit") return respond(await submitSocialPost(id));
   if (action === "publish") return respond(await simulatePublishSocialPost(id));

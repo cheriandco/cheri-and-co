@@ -1,11 +1,20 @@
 import type { Metadata } from "next";
 import { getAgents, getCurrentUser } from "@/services";
+import { authRequired } from "@/lib/auth/mode";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { PageHeader, DashboardCard, SectionHeader, StatusBadge } from "@/components/ui";
 
 export const metadata: Metadata = { title: "Settings" };
 
-const INTEGRATIONS = [
-  ["Instagram", "Not connected (demo)", ""], ["Supabase (CRM database)", "Not connected — mock data active", ""],
+/** Honest status: the database holds accounts and the schema only; every agent still reads sample data. */
+function supabaseStatus(): string {
+  if (authRequired()) return "Sign-in and organisation access active. Agent data is still SAMPLE data, not read from the database yet";
+  if (isSupabaseConfigured()) return "Configured, but sign-in is off (demo mode). Agent data is SAMPLE data";
+  return "Not connected — mock data active";
+}
+
+const integrations = (): string[][] => [
+  ["Instagram", "Not connected (demo)", ""], ["Supabase (accounts and database)", supabaseStatus(), ""],
   ["Amazon Seller data", "Not connected", ""], ["Anthropic Claude (API)", "Not connected — drafts use templates. Needs an Anthropic Console API key; a Claude Team plan alone is not API access", ""],
   ["Canva", "Not connected — design briefs only", ""],
 ];
@@ -19,11 +28,11 @@ export default async function SettingsPage() {
         <DashboardCard>
           <SectionHeader title="Profile" />
           <dl className="kv"><dt>Name</dt><dd>{user.name}</dd><dt>Email</dt><dd>{user.email}</dd><dt>Role</dt><dd>{user.role}</dd></dl>
-          <p className="muted" style={{ marginTop: 16, fontSize: 12.5 }}>Sample profile for this demonstration. Sign-in and role-based access come with the production build.</p>
+          <p className="muted" style={{ marginTop: 16, fontSize: 12.5 }}>{authRequired() ? "Signed-in account. Role and organisation come from the database." : "Sample profile for this demonstration. Set AUTH_MODE=required to turn on sign-in and role-based access."}</p>
         </DashboardCard>
         <DashboardCard>
           <SectionHeader title="Integrations" />
-          <div className="list">{INTEGRATIONS.map(([n, s, t]) => <div className="list-item" key={n}><div className="body"><div className="title">{n}</div><div className="sub">{s}</div></div><span className={`badge ${t}`}>{t ? "Attention" : "Not connected"}</span></div>)}</div>
+          <div className="list">{integrations().map(([n, s, t]) => <div className="list-item" key={n}><div className="body"><div className="title">{n}</div><div className="sub">{s}</div></div><span className={`badge ${t}`}>{t ? "Attention" : n.startsWith("Supabase") && authRequired() ? "Sign-in only" : "Not connected"}</span></div>)}</div>
         </DashboardCard>
         <DashboardCard>
           <SectionHeader title="AI agents" />

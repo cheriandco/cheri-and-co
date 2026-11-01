@@ -1,3 +1,4 @@
+import { deny } from "@/lib/auth/access";
 import { NextResponse } from "next/server";
 import * as s from "@/services";
 import { isPriority, readJson, str } from "@/lib/validate";
@@ -16,6 +17,8 @@ const readers: Record<string, () => Promise<unknown>> = {
 };
 
 export async function GET(_req: Request, ctx: { params: Promise<{ resource: string }> }) {
+  const denied = await deny("data:read", _req);
+  if (denied) return denied;
   const { resource } = await ctx.params;
   const read = readers[resource];
   if (!read) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -23,6 +26,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ resource: stri
 }
 
 export async function POST(req: Request, ctx: { params: Promise<{ resource: string }> }) {
+  const denied = await deny("tasks:write", req);
+  if (denied) return denied;
   const { resource } = await ctx.params;
   if (resource !== "tasks") return NextResponse.json({ error: "Not found" }, { status: 404 });
   const body = await readJson(req);
