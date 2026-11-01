@@ -14,14 +14,14 @@ export function SocialStatusBadge({ status }: { status: SocialStatus }) {
   return <span className={`badge ${TONE[status]}`}>{STATUS_LABEL[status]}</span>;
 }
 
-export function SocialStats({ posts }: { posts: SocialPostView[] }) {
+export function SocialStats({ posts, live = false }: { posts: SocialPostView[]; live?: boolean }) {
   const s = summarize(posts);
   const items: [string, number | string, string][] = [
     ["Planned posts", s.total, "Across Instagram, Facebook and LinkedIn"],
     ["Drafts", s.drafts, "Still being written"],
     ["Awaiting approval", s.pending, "Needs a human decision"],
-    ["Approved", s.approved, "Ready to simulate publishing"],
-    ["Simulated published", s.simulated, "Not posted anywhere"],
+    ["Approved", s.approved, live ? "Ready for you to publish by hand" : "Ready to simulate publishing"],
+    ...(live ? [] : [["Simulated published", s.simulated, "Not posted anywhere"] as [string, number, string]]),
   ];
   return (
     <div className="grid kpis social-stats">
@@ -67,7 +67,7 @@ export function CalendarGrid({ posts, today }: { posts: SocialPostView[]; today:
   );
 }
 
-export function PostList({ posts, empty, actions = true }: { posts: SocialPostView[]; empty?: string; actions?: boolean }) {
+export function PostList({ posts, empty, actions = true, simulate = true }: { posts: SocialPostView[]; empty?: string; actions?: boolean; simulate?: boolean }) {
   if (!posts.length) return <EmptyState title={empty ?? "No posts yet"} hint="Create a post to see it here." />;
   return (
     <div className="list">
@@ -76,12 +76,12 @@ export function PostList({ posts, empty, actions = true }: { posts: SocialPostVi
           <Thumb tone={p.tone} />
           <div className="body">
             <div className="title">{p.title}</div>
-            <div className="sub">{p.platform} · {formatDay(p.scheduledFor)}{p.isSample ? " · SAMPLE" : " · your draft"}</div>
+            <div className="sub">{p.platform} · {formatDay(p.scheduledFor)}{p.isSample ? " · SAMPLE" : simulate ? " · your draft" : ""}</div>
           </div>
           <div className="meta">
             <SocialStatusBadge status={p.status} />
             {actions && (p.status === "draft" || p.status === "rejected") && <Link className="btn sm" href={`/content?tab=create&edit=${p.id}`}>Edit</Link>}
-            {actions && p.status === "approved" && <SimulatePublish id={p.id} />}
+            {actions && simulate && p.status === "approved" && <SimulatePublish id={p.id} />}
             {actions && p.status === "pending_approval" && <Link className="btn sm ghost" href="/content?tab=approvals">Review</Link>}
           </div>
         </div>

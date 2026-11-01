@@ -124,10 +124,12 @@ export interface Product {
   name: string;
   sku: string;
   category: string;
-  price: number;
-  stock: number;
+  /** null when the price has not been entered (the database allows it). */
+  price: number | null;
+  /** null when the stock level has not been entered. */
+  stock: number | null;
   channels: string[];
-  status: "active" | "draft" | "low_stock";
+  status: "active" | "draft" | "low_stock" | "archived";
 }
 
 export type ContentStatus =

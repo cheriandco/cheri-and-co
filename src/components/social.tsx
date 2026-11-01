@@ -24,7 +24,7 @@ async function call<T>(url: string, body?: unknown): Promise<{ ok: true; data: T
 
 const ASSIST_BUTTONS: [AssistMode, string][] = [["ideas", "Post ideas"], ["caption", "Caption"], ["brief", "Creative brief"]];
 
-export function PostComposer({ initial, postId }: { initial?: Partial<Values>; postId?: string }) {
+export function PostComposer({ initial, postId, live = false }: { initial?: Partial<Values>; postId?: string; live?: boolean }) {
   const router = useRouter();
   const [v, setV] = useState<Values>({ ...EMPTY, ...initial });
   const [busy, setBusy] = useState<string | null>(null);
@@ -51,7 +51,7 @@ export function PostComposer({ initial, postId }: { initial?: Partial<Values>; p
     setBusy("save");
     const id = await save();
     setBusy(null);
-    if (id) { setNotice({ kind: "ok", text: "Draft saved in your private demo copy. Nothing has been posted." }); router.refresh(); }
+    if (id) { setNotice({ kind: "ok", text: live ? "Draft saved. Nothing has been posted." : "Draft saved in your private demo copy. Nothing has been posted." }); router.refresh(); }
   }
 
   async function submit() {
@@ -60,7 +60,7 @@ export function PostComposer({ initial, postId }: { initial?: Partial<Values>; p
     if (!id) { setBusy(null); return; }
     const res = await call<unknown>(`/api/social/posts/${id}/submit`);
     setBusy(null);
-    if (res.ok) { setNotice({ kind: "ok", text: "Sent to the approval queue (demo). Nothing has been posted." }); router.refresh(); }
+    if (res.ok) { setNotice({ kind: "ok", text: live ? "Sent to the approval queue. Nothing has been posted." : "Sent to the approval queue (demo). Nothing has been posted." }); router.refresh(); }
     else setNotice({ kind: "error", text: res.error, issues: res.issues });
   }
 
@@ -72,7 +72,7 @@ export function PostComposer({ initial, postId }: { initial?: Partial<Values>; p
   return (
     <div className="grid even">
       <DashboardCard>
-        <SectionHeader title={savedId ? "Edit post" : "Create a post"} extra={<span className="badge champagne plain">Demo · nothing is posted</span>} />
+        <SectionHeader title={savedId ? "Edit post" : "Create a post"} extra={<span className="badge champagne plain">{live ? "Nothing is posted by this app" : "Demo · nothing is posted"}</span>} />
         <form onSubmit={(e) => { e.preventDefault(); void saveDraft(); }} noValidate>
           <div className="field"><label htmlFor="sp-title">Post title</label>
             <input id="sp-title" value={v.title} maxLength={120} onChange={(e) => set("title", e.target.value)} placeholder="e.g. Everyday minimal stack" /></div>
@@ -94,7 +94,7 @@ export function PostComposer({ initial, postId }: { initial?: Partial<Values>; p
             <textarea id="sp-image" value={v.imageDirection} maxLength={800} onChange={(e) => set("imageDirection", e.target.value)} /></div>
           <div className="row" style={{ flexWrap: "wrap", gap: 10 }}>
             <button type="submit" className="btn" disabled={busy !== null}>{busy === "save" ? "Saving…" : "Save draft"}</button>
-            <button type="button" className="btn primary" disabled={busy !== null} onClick={() => void submit()}>{busy === "submit" ? "Sending…" : "Submit for approval (demo)"}</button>
+            <button type="button" className="btn primary" disabled={busy !== null} onClick={() => void submit()}>{busy === "submit" ? "Sending…" : live ? "Submit for approval" : "Submit for approval (demo)"}</button>
           </div>
           <div aria-live="polite" style={{ marginTop: 12 }}>
             {notice && (
@@ -108,7 +108,7 @@ export function PostComposer({ initial, postId }: { initial?: Partial<Values>; p
       </DashboardCard>
 
       <DashboardCard tint>
-        <SectionHeader title="AI content assistant" extra={<span className="badge champagne plain">Demo response</span>} />
+        <SectionHeader title="AI content assistant" extra={<span className="badge champagne plain">{live ? "Template response" : "Demo response"}</span>} />
         <p className="muted" style={{ fontSize: 12.5, marginTop: 0 }}>
           Template-based suggestions for the selected platform. No AI model is connected and nothing leaves this page. Fill in a topic, then choose what you want help with.
         </p>

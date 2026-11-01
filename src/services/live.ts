@@ -2,15 +2,17 @@
  *  every call. The organisation always comes from the verified session (`orgId`), never from a request. Used only for
  *  organisations that are not flagged is_demo. This covers tasks, approvals, the audit log, agent activity, customers, retailers and leads. */
 import { cache } from "react";
-import { AuthError } from "@/lib/auth/access";
+import { AuthError, ConflictError } from "@/lib/auth/access";
 import { getAuthUser } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { findProhibitedClaims } from "@/lib/content-agent/claims";
-import type { CustomerInput, RetailerInput } from "@/lib/validate";
-import type { Activity, AgentKey, Approval, AuditEntry, Customer, Deal, PipelineStage, Retailer, Task } from "@/types";
+import { renderPostForApproval, toView } from "@/lib/social/posts";
+import type { CustomerInput, ProductInput, RetailerInput } from "@/lib/validate";
+import type { Activity, AgentKey, Approval, ApprovalStatus, AuditEntry, Customer, Deal, PipelineStage, Product, Retailer, Task } from "@/types";
+import type { SocialPost, SocialPostInput, SocialPostView } from "@/types/social";
 import {
-  parseDue, toActivity, toApproval, toAudit, toCustomer, toDeal, toRetailer, toTask,
-  type ActivityRow, type ApprovalRow, type AuditRow, type CustomerRow, type LeadRow, type RetailerRow, type TaskRow,
+  SOCIAL_DB_PLATFORMS, parseDue, toActivity, toApproval, toAudit, toCustomer, toDeal, toProduct, toRetailer, toSocialPost, toTask,
+  type ActivityRow, type ApprovalRow, type AuditRow, type ContentRow, type CustomerRow, type LeadRow, type ProductRow, type RetailerRow, type TaskRow,
 } from "./live-map";
 import type { Store } from "./store";
 
@@ -104,8 +106,15 @@ export async function liveDecideApproval(id: string, action: "approve" | "reject
     fail(error);
   }
   const approval = toApproval(data as ApprovalRow);
+  if (action !== "edit") await syncContentStatus(supabase, orgId, id, action === "approve" ? "approved" : "rejected");
   await liveLog({ agent: approval.generatedBy, action: `${action === "approve" ? "Approved" : action === "reject" ? "Rejected" : "Edited"}: ${approval.title}` });
   return { ok: true, approval };
+}
+
+/** Keeps content_items.status in step with the decision on its approval. Best effort: the post's shown status follows the
+ *  approval itself, so a failure here cannot make the calendar wrong. */
+async function syncContentStatus(supabase: Awaited<ReturnType<typeof ctx>>["supabase"], orgId: string, approvalId: string, status: "approved" | "rejected") {
+  try { await supabase.from("content_items").update({ status }).eq("org_id", orgId).eq("approval_id", approvalId); } catch { /* see above */ }
 }
 
 export async function liveAudit(): Promise<AuditEntry[]> {
@@ -229,4 +238,166 @@ export async function liveMoveDeal(id: string, stage: PipelineStage): Promise<De
   const n = await names(supabase, [lead.owner_id]);
   await liveLog({ agent: "crm", action: `Moved ${(rt as RetailerRow).business} to ${stage}` });
   return toDeal(lead, rt as RetailerRow, n);
+}
+
+/* ---------- Products ---------- */
+
+const PRODUCT_COLS = "id, sku, name, category, price, stock, status, channels, created_at";
+
+/** Postgres unique_violation: the (org_id, sku) constraint. */
+const isDuplicate = (error: { code?: string; message: string }) => error.code === "23505" || /duplicate key/i.test(error.message);
+
+export async function liveProducts(): Promise<Product[]> {
+  const { supabase, orgId } = await ctx();
+  const { data, error } = await supabase.from("products").select(PRODUCT_COLS).eq("org_id", orgId).order("created_at", { ascending: false }).limit(500);
+  if (error) fail(error);
+  return ((data ?? []) as ProductRow[]).map(toProduct);
+}
+
+export async function liveProduct(id: string): Promise<Product | null> {
+  if (!UUID.test(id)) return null;
+  const { supabase, orgId } = await ctx();
+  const { data, error } = await supabase.from("products").select(PRODUCT_COLS).eq("org_id", orgId).eq("id", id).maybeSingle();
+  if (error) fail(error);
+  return data ? toProduct(data as ProductRow) : null;
+}
+
+export async function liveCreateProduct(input: ProductInput): Promise<Product> {
+  const { supabase, orgId } = await ctx();
+  const { data, error } = await supabase.from("products").insert({ org_id: orgId, ...input }).select(PRODUCT_COLS).single();
+  if (error) {
+    if (isDuplicate(error)) throw new ConflictError("A product with this SKU already exists");
+    fail(error);
+  }
+  await liveLog({ agent: "content", action: `Added product: ${input.name}` });
+  return toProduct(data as ProductRow);
+}
+
+export async function liveUpdateProduct(id: string, input: ProductInput): Promise<Product | null> {
+  if (!UUID.test(id)) return null;
+  const { supabase, orgId } = await ctx();
+  const { data, error } = await supabase.from("products").update(input).eq("org_id", orgId).eq("id", id).select(PRODUCT_COLS);
+  if (error) {
+    if (isDuplicate(error)) throw new ConflictError("A product with this SKU already exists");
+    fail(error);
+  }
+  const row = ((data ?? []) as ProductRow[])[0];
+  if (!row) return null;
+  await liveLog({ agent: "content", action: `Updated product: ${input.name}` });
+  return toProduct(row);
+}
+
+/* ---------- Content calendar / social posts (content_items) ---------- */
+
+const CONTENT_COLS = "id, platform, title, topic, caption, hashtags, creative_brief, image_direction, scheduled_for, status, approval_id, created_at";
+
+/** A post's status follows its approval; the content_items.status column is kept in step but is only the fallback. */
+async function approvalStatuses(supabase: Awaited<ReturnType<typeof ctx>>["supabase"], orgId: string, rows: ContentRow[]): Promise<Map<string, ApprovalStatus>> {
+  const ids = [...new Set(rows.map((r) => r.approval_id).filter((x): x is string => !!x))];
+  const out = new Map<string, ApprovalStatus>();
+  if (!ids.length) return out;
+  const { data } = await supabase.from("approvals").select("id, status").eq("org_id", orgId).in("id", ids);
+  for (const a of (data ?? []) as { id: string; status: ApprovalStatus }[]) out.set(a.id, a.status);
+  return out;
+}
+
+const viewFor = (r: ContentRow, statuses: Map<string, ApprovalStatus>): SocialPostView =>
+  toView(toSocialPost(r), new Date(), r.approval_id ? statuses.get(r.approval_id) : undefined);
+
+export async function liveSocialPosts(): Promise<SocialPostView[]> {
+  const { supabase, orgId } = await ctx();
+  const { data, error } = await supabase.from("content_items").select(CONTENT_COLS).eq("org_id", orgId)
+    .in("platform", [...SOCIAL_DB_PLATFORMS]).order("created_at", { ascending: false }).limit(500);
+  if (error) fail(error);
+  const rows = (data ?? []) as ContentRow[];
+  const statuses = await approvalStatuses(supabase, orgId, rows);
+  return rows.map((r) => viewFor(r, statuses));
+}
+
+async function loadPost(id: string) {
+  const { supabase, orgId } = await ctx();
+  if (!UUID.test(id)) return { supabase, orgId, row: null, view: null };
+  const { data, error } = await supabase.from("content_items").select(CONTENT_COLS).eq("org_id", orgId).eq("id", id)
+    .in("platform", [...SOCIAL_DB_PLATFORMS]).maybeSingle();
+  if (error) fail(error);
+  const row = (data as ContentRow | null) ?? null;
+  return { supabase, orgId, row, view: row ? viewFor(row, await approvalStatuses(supabase, orgId, [row])) : null };
+}
+
+const contentColumns = (input: SocialPostInput) => ({
+  platform: input.platform, title: input.title, topic: input.topic || null, caption: input.caption || null, hashtags: input.hashtags,
+  creative_brief: input.creativeBrief || null, image_direction: input.imageDirection || null,
+});
+
+/** A new post is always a draft. The planned date defaults to a week from today, like the demo. */
+export async function liveCreateSocialPost(input: SocialPostInput, defaultDate: string): Promise<SocialPost> {
+  const { supabase, orgId } = await ctx();
+  const { data, error } = await supabase.from("content_items")
+    .insert({ org_id: orgId, ...contentColumns(input), scheduled_for: input.scheduledFor ?? defaultDate, status: "draft" }).select(CONTENT_COLS).single();
+  if (error) fail(error);
+  await liveLog({ agent: "content", action: `Drafted post: ${input.title}` });
+  return toSocialPost(data as ContentRow);
+}
+
+export type LivePostResult =
+  | { ok: true; post: SocialPostView }
+  | { ok: false; reason: "not_found" | "invalid_state" | "prohibited_claims"; error: string; detail?: string[] };
+
+/** Only drafts and rejected posts can be edited. Editing makes it a fresh draft with no approval attached. */
+export async function liveUpdateSocialPost(id: string, input: SocialPostInput): Promise<LivePostResult> {
+  const { supabase, orgId, row, view } = await loadPost(id);
+  if (!row || !view) return { ok: false, reason: "not_found", error: "Post not found." };
+  if (view.status !== "draft" && view.status !== "rejected") return { ok: false, reason: "invalid_state", error: "Only drafts and rejected posts can be edited." };
+  const change = { ...contentColumns(input), status: "draft", approval_id: null, ...(input.scheduledFor ? { scheduled_for: input.scheduledFor } : {}) };
+  const { data, error } = await supabase.from("content_items").update(change).eq("org_id", orgId).eq("id", id).select(CONTENT_COLS);
+  if (error) fail(error);
+  const saved = ((data ?? []) as ContentRow[])[0];
+  if (!saved) return { ok: false, reason: "not_found", error: "Post not found." };
+  return { ok: true, post: viewFor(saved, new Map()) };
+}
+
+/** Claims the draft first (so a double click cannot queue it twice), then queues a pending approval and links it.
+ *  The claim guard runs before anything is written. Nothing is published. */
+export async function liveSubmitSocialPost(id: string): Promise<LivePostResult> {
+  const { supabase, orgId, row, view } = await loadPost(id);
+  if (!row || !view) return { ok: false, reason: "not_found", error: "Post not found." };
+  if (view.status !== "draft") return { ok: false, reason: "invalid_state", error: "Only drafts can be submitted for approval." };
+  if (!view.caption.trim()) return { ok: false, reason: "invalid_state", error: "Add a caption before submitting." };
+  const preview = renderPostForApproval(view);
+  const violations = findProhibitedClaims(preview, []);
+  if (violations.length) {
+    return { ok: false, reason: "prohibited_claims", error: "The post contains wording that needs client-approved claims.", detail: violations.map((v) => `${v.label}: "${v.match}"`) };
+  }
+  const claim = await supabase.from("content_items").update({ status: "pending_approval" }).eq("org_id", orgId).eq("id", id).eq("status", "draft").select("id");
+  if (claim.error) fail(claim.error);
+  if (!((claim.data ?? []) as unknown[]).length) return { ok: false, reason: "invalid_state", error: "Only drafts can be submitted for approval." };
+  const made = await supabase.from("approvals").insert({
+    org_id: orgId, title: `${view.title} · ${view.platform} post`, type: "Content", generated_by: "content", status: "pending", preview,
+    meta: { kind: "content_draft", subject: view.title, isSample: false, allowedClaims: [] },
+  }).select("id").single();
+  if (made.error || !made.data) {
+    await supabase.from("content_items").update({ status: "draft" }).eq("org_id", orgId).eq("id", id); // put it back so it can be retried
+    fail(made.error ?? { message: "Database request failed" });
+  }
+  const approvalId = (made.data as { id: string }).id;
+  const link = await supabase.from("content_items").update({ approval_id: approvalId }).eq("org_id", orgId).eq("id", id).select(CONTENT_COLS);
+  const saved = ((link.data ?? []) as ContentRow[])[0];
+  if (link.error || !saved) {
+    await undoSubmit(supabase, orgId, id, approvalId);
+    if (link.error) fail(link.error);
+    return { ok: false, reason: "not_found", error: "Post not found." };
+  }
+  await liveLog({ agent: "content", action: `Sent "${view.title}" (${view.platform}) for approval` });
+  return { ok: true, post: viewFor(saved, new Map([[approvalId, "pending" as ApprovalStatus]])) };
+}
+
+/** The approval was created but could not be linked to its post. The database allows no delete or update of approvals, so
+ *  this uses only what is already permitted: put the post back to a draft (it can be resubmitted), and, if the caller may
+ *  decide approvals, reject the unlinked approval through decide_approval() so it does not sit in the queue. Anyone else
+ *  (staff) leaves a pending approval that no post points to; approving it does nothing. Best effort. */
+async function undoSubmit(supabase: Awaited<ReturnType<typeof ctx>>["supabase"], orgId: string, postId: string, approvalId: string) {
+  try { await supabase.from("content_items").update({ status: "draft" }).eq("org_id", orgId).eq("id", postId); } catch { /* see above */ }
+  try {
+    await supabase.rpc("decide_approval", { p_id: approvalId, p_action: "reject", p_note: "Not linked to a post: the submission failed. Please resubmit.", p_title: null, p_preview: null });
+  } catch { /* the caller may not be allowed to decide */ }
 }

@@ -62,7 +62,13 @@ Optionally add a second organisation `('Cheri & Co. (sample demo)', true)` and a
   Gaps: no Amazon/Flipkart click columns (shown as 0 and hidden for live orgs); `purchases` = count of the customer's orders;
   retailer score/temperature/stage live on `leads`; the Maps link is a derived search link; Qualification factors, follow-up
   recommendations and discovery candidates are sample-only and hidden for live orgs.
-- Not connected yet: products, orders, content items, and the agents' own inputs (B2C conversations, Amazon data, B2B discovery).
+- Slice 3: Products (list, detail, create, edit; `products:write` = owner/admin/approver/staff) and Content (`content_items`: social
+  posts on Instagram, Facebook and LinkedIn; create, edit a draft or rejected post, submit for approval). A post's status follows its
+  approval (queued as a pending `approvals` row, decided through `decide_approval()`); `content_items.status` is mirrored after a decision.
+  Gaps: no engagement/metrics columns (Performance is "not available"); no asset storage; no brand-rule table; "Simulate publish" is
+  demo-only (the app never posts); the Content pack generator uses the sample catalogue so it is hidden for live orgs; posts on
+  Pinterest, Email and Amazon A+ are allowed by the table but have no screen; no delete UI; a product price or stock left blank stays null.
+- Not connected yet: orders and the agents' own inputs (B2C conversations, Amazon data, B2B discovery).
   For a live organisation these show "Not connected yet" or empty, never sample data.
 
 ## Known limitations

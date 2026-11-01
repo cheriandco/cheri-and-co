@@ -172,3 +172,70 @@ describe("new users", () => {
     expect(await rows("select * from public.memberships where user_id = '44444444-0000-0000-0000-000000000001'")).toEqual([]);
   });
 });
+
+describe("products and content items (real SQL in PGlite, not the hosted project)", () => {
+  const PA = "cccccccc-1111-0000-0000-000000000001";
+  const PB = "cccccccc-1111-0000-0000-000000000002";
+  const CA = "dddddddd-1111-0000-0000-000000000001";
+  const APP_A = "eeeeeeee-1111-0000-0000-000000000001";
+  const APP_B = "bbbbbbbb-1111-0000-0000-000000000001";
+  beforeAll(async () => {
+    await db.exec(`
+      insert into public.products (id, org_id, sku, name, price, stock) values
+        ('${PA}', '${ORG_A}', 'SKU-1', 'A product', 100, 5), ('${PB}', '${ORG_B}', 'SKU-1', 'B product', 200, 7);
+      insert into public.approvals (id, org_id, title, type, generated_by, preview) values ('${APP_A}', '${ORG_A}', 'Post', 'Content', 'content', 'text');
+      insert into public.content_items (id, org_id, platform, title) values ('${CA}', '${ORG_A}', 'Instagram', 'A post');
+    `);
+  });
+
+  it("members read only their own organisation's products and content", async () => {
+    expect((await as(U.staffA, () => rows("select name from public.products"))).map((r) => r.name)).toEqual(["A product"]);
+    expect((await as(U.ownerB, () => rows("select name from public.products"))).map((r) => r.name)).toEqual(["B product"]);
+    expect((await as(U.ownerB, () => rows("select title from public.content_items"))).length).toBe(0);
+  });
+  it("writers can create and edit; a viewer cannot", async () => {
+    await as(U.staffA, () => db.query(`insert into public.products (org_id, sku, name) values ('${ORG_A}', 'SKU-2', 'Second')`));
+    await as(U.staffA, () => db.query(`update public.products set name = 'Renamed' where id = '${PA}'`));
+    expect((await rows(`select name from public.products where id = '${PA}'`))[0].name).toBe("Renamed");
+    expect(await as(U.viewerA, () => fails(`insert into public.products (org_id, sku, name) values ('${ORG_A}', 'SKU-3', 'x')`))).toMatch(/row-level security/);
+    await as(U.viewerA, () => db.query(`update public.products set name = 'Hacked' where id = '${PA}'`));
+    expect((await rows(`select name from public.products where id = '${PA}'`))[0].name).toBe("Renamed");
+    expect(await as(U.viewerA, () => fails(`insert into public.content_items (org_id, platform, title) values ('${ORG_A}', 'Instagram', 'x')`))).toMatch(/row-level security/);
+  });
+  it("cannot write into, or edit, another organisation's catalogue", async () => {
+    expect(await as(U.ownerA, () => fails(`insert into public.products (org_id, sku, name) values ('${ORG_B}', 'SKU-9', 'x')`))).toMatch(/row-level security/);
+    await as(U.ownerA, () => db.query(`update public.products set name = 'Hijacked' where id = '${PB}'`));
+    expect((await rows(`select name from public.products where id = '${PB}'`))[0].name).toBe("B product");
+    expect(await as(U.ownerA, () => fails(`update public.products set org_id = '${ORG_B}' where id = '${PA}'`))).toMatch(/row-level security/);
+  });
+  it("SKUs are unique inside an organisation but may repeat across organisations", async () => {
+    expect(await as(U.staffA, () => fails(`insert into public.products (org_id, sku, name) values ('${ORG_A}', 'SKU-1', 'dup')`))).toMatch(/duplicate key/);
+  });
+  it("the table's own checks reject bad values", async () => {
+    for (const bad of ["price = -1", "stock = -1", "status = 'sold'", "name = ''"]) {
+      expect(await as(U.staffA, () => fails(`update public.products set ${bad} where id = '${PA}'`)), bad).toMatch(/check constraint/);
+    }
+    for (const bad of [`platform = 'TikTok'`, `status = 'live'`, `caption = '${"x".repeat(2201)}'`]) {
+      expect(await as(U.staffA, () => fails(`update public.content_items set ${bad} where id = '${CA}'`)), bad).toMatch(/check constraint/);
+    }
+  });
+  it("only owner or admin can delete products", async () => {
+    await as(U.staffA, () => db.query(`delete from public.products where sku = 'SKU-2'`));
+    expect((await rows("select 1 from public.products where sku = 'SKU-2'")).length).toBe(1);
+    await as(U.ownerA, () => db.query(`delete from public.products where sku = 'SKU-2'`));
+    expect((await rows("select 1 from public.products where sku = 'SKU-2'")).length).toBe(0);
+  });
+  it("a post can link only to an approval in its own organisation", async () => {
+    expect(await as(U.staffA, () => fails(`update public.content_items set approval_id = '${APP_B}' where id = '${CA}'`))).toMatch(/foreign key/);
+    await as(U.staffA, () => db.query(`update public.content_items set status = 'pending_approval', approval_id = '${APP_A}' where id = '${CA}'`));
+    expect((await rows(`select status from public.content_items where id = '${CA}'`))[0].status).toBe("pending_approval");
+  });
+  it("approval workflow: a writer queues a pending approval; only approvers decide; the decision can be mirrored onto the post", async () => {
+    expect(await as(U.staffA, () => fails(`insert into public.approvals (org_id, title, type, generated_by, preview, status) values ('${ORG_A}', 'x', 'Content', 'content', 'p', 'approved')`))).toMatch(/row-level security/);
+    expect(await as(U.staffA, () => fails(`select public.decide_approval('${APP_A}', 'approve')`))).toBeTruthy();
+    await as(U.approverA, () => db.query(`select public.decide_approval('${APP_A}', 'approve')`));
+    await as(U.approverA, () => db.query(`update public.content_items set status = 'approved' where approval_id = '${APP_A}'`));
+    expect((await rows(`select status from public.content_items where id = '${CA}'`))[0].status).toBe("approved");
+    expect((await rows(`select status from public.approvals where id = '${APP_A}'`))[0].status).toBe("approved");
+  });
+});

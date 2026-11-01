@@ -12,12 +12,13 @@ import { DISCOVERY_NOTE, discoveryCandidates, type DiscoveryCandidate } from "@/
 import { amazonActionFor, buildSuggestions, followUpEmail, scoreCandidate, suggestedReplyFor, temperatureFor, type Suggestion } from "@/lib/agent-logic";
 import { AGENT_NAMES, STAGE_LABELS } from "@/lib/agents";
 import { renderDraft } from "@/lib/content-agent/render";
-import type { CustomerInput, RetailerInput } from "@/lib/validate";
+import type { CustomerInput, ProductInput, RetailerInput } from "@/lib/validate";
 import {
-  liveCreateCustomer, liveCreateRetailer, liveCreateTask, liveCustomer, liveCustomers, liveDecideApproval, liveMoveDeal, liveUpdateTask,
+  liveCreateCustomer, liveCreateProduct, liveCreateRetailer, liveCreateSocialPost, liveCreateTask, liveCustomer, liveCustomers, liveDecideApproval,
+  liveMoveDeal, liveProduct, liveProducts, liveSocialPosts, liveSubmitSocialPost, liveUpdateProduct, liveUpdateSocialPost, liveUpdateTask,
 } from "./live";
 import { readStore, writableStore, type Store } from "./store";
-import type {
+import type { Product,
   Activity, AgentKey, Approval, AuditEntry, Conversation, Customer, DashboardSummary, Deal, PipelineStage,
   ReportSection, Retailer, Task,
 } from "@/types";
@@ -75,7 +76,8 @@ export async function getCustomers(): Promise<Customer[]> { await tick(); return
 export async function getCustomer(id: string) { await tick(); return (await isLiveOrg()) ? liveCustomer(id) : (m.customers.find((c) => c.id === id) ?? null); }
 export async function getRetailers(): Promise<Retailer[]> { await tick(); return (await readStore()).retailers; }
 export async function getRetailer(id: string) { await tick(); return (await readStore()).retailers.find((r) => r.id === id) ?? null; }
-export async function getProducts() { await tick(); return sampleOr([], () => m.products); }
+export async function getProducts(): Promise<Product[]> { await tick(); return (await isLiveOrg()) ? liveProducts() : m.products; }
+export async function getProduct(id: string): Promise<Product | null> { await tick(); return (await isLiveOrg()) ? liveProduct(id) : (m.products.find((p) => p.id === id) ?? null); }
 export async function getContent() { await tick(); return sampleOr([], () => m.contentItems); }
 export async function getBrandRules() { await tick(); return sampleOr([], () => m.brandRules); }
 export async function getNotifications() { await tick(); return sampleOr([], () => m.notifications); }
@@ -181,12 +183,14 @@ function contentClaimsFor(input: ContentRunInput): string[] {
 
 export async function getSocialPosts(): Promise<SocialPostView[]> {
   await tick();
+  if (await isLiveOrg()) return liveSocialPosts();
   const s = await readStore();
   const today = new Date();
   return s.social.map((p) => toView(p, today, p.approvalId ? s.approvals.find((a) => a.id === p.approvalId)?.status : undefined));
 }
 
 export async function createSocialPost(input: SocialPostInput): Promise<SocialPost> {
+  if (await isLiveOrg()) return liveCreateSocialPost(input, isoDate(addDays(new Date(), 7)));
   const { scheduledFor, ...rest } = input;
   const post: SocialPost = {
     id: `sp-${crypto.randomUUID().slice(0, 8)}`, ...rest, isSample: false, tone: "rose",
@@ -205,6 +209,7 @@ const viewOf = (s: Awaited<ReturnType<typeof writableStore>>, p: SocialPost): So
 
 /** Edit is allowed while the post is a draft or was rejected. Editing resets it to a fresh draft. */
 export async function updateSocialPost(id: string, input: SocialPostInput): Promise<SocialResult> {
+  if (await isLiveOrg()) return liveUpdateSocialPost(id, input);
   const s = await writableStore();
   const p = s.social.find((x) => x.id === id);
   if (!p) return { ok: false, reason: "not_found", error: "Post not found." };
@@ -219,6 +224,7 @@ export async function updateSocialPost(id: string, input: SocialPostInput): Prom
 
 /** Queues the post as a pending approval. The claim guard runs first, and nothing is published. */
 export async function submitSocialPost(id: string): Promise<SocialResult> {
+  if (await isLiveOrg()) return liveSubmitSocialPost(id);
   const s = await writableStore();
   const p = s.social.find((x) => x.id === id);
   if (!p) return { ok: false, reason: "not_found", error: "Post not found." };
@@ -242,6 +248,7 @@ export async function submitSocialPost(id: string): Promise<SocialResult> {
 
 /** "Publishes" an approved post in the simulation only. No platform is contacted. */
 export async function simulatePublishSocialPost(id: string): Promise<SocialResult> {
+  if (await isLiveOrg()) return { ok: false, reason: "invalid_state", error: "Publishing is not available. This app never posts to a platform; publish by hand outside the app." };
   const s = await writableStore();
   const p = s.social.find((x) => x.id === id);
   if (!p) return { ok: false, reason: "not_found", error: "Post not found." };
@@ -292,6 +299,7 @@ export async function getSearchIndex() {
     return [
       ...customers.map((c) => ({ label: c.name, hint: "Customer", href: `/customers/${c.id}` })),
       ...retailers.map((r) => ({ label: r.business, hint: "Retailer", href: `/retailers/${r.id}` })),
+      ...(await liveProducts()).map((p) => ({ label: p.name, hint: "Product", href: `/products/${p.id}` })),
     ];
   }
   return [
@@ -412,7 +420,7 @@ export interface OrchestratorBrief {
 export async function getOrchestratorBrief(): Promise<OrchestratorBrief> {
   await tick();
   const s = await readStore();
-  if (await isLiveOrg()) return liveBrief(s);
+  if (await isLiveOrg()) return liveBrief(s, await liveSocialPosts());
   const pending = (k: AgentKey) => s.approvals.filter((a) => a.status === "pending" && a.generatedBy === k).length;
   const hot = s.retailers.filter((r) => r.temperature === "HOT").length;
   const open = s.tasks.filter((t) => t.status === "open").length;
@@ -436,7 +444,7 @@ export async function getOrchestratorBrief(): Promise<OrchestratorBrief> {
 
 /** What the orchestrator can honestly say for a live organisation: approvals and tasks come from the database, and
  *  every other agent says it is not connected yet instead of quoting sample numbers. */
-function liveBrief(s: Store): OrchestratorBrief {
+function liveBrief(s: Store, posts: SocialPostView[]): OrchestratorBrief {
   const pending = (k: AgentKey) => s.approvals.filter((a) => a.status === "pending" && a.generatedBy === k).length;
   const open = s.tasks.filter((t) => t.status === "open").length;
   const hot = s.retailers.filter((r) => r.temperature === "HOT").length;
@@ -445,6 +453,7 @@ function liveBrief(s: Store): OrchestratorBrief {
   const headline = (key: AgentKey) =>
     key === "crm" ? `${open} open task${open === 1 ? "" : "s"}, ${negotiating} deal${negotiating === 1 ? "" : "s"} in negotiation`
     : key === "b2b" ? `${hot} hot lead${hot === 1 ? "" : "s"}, ${s.retailers.length} retailer${s.retailers.length === 1 ? "" : "s"} tracked`
+    : key === "content" ? `${posts.length} planned post${posts.length === 1 ? "" : "s"}, ${pending("content")} awaiting approval`
     : "Not connected to the database yet";
   const agents = (Object.keys(hrefs) as AgentKey[]).map((key) => ({ key, name: AGENT_NAMES[key], href: hrefs[key], pending: pending(key), headline: headline(key) }));
   return {
@@ -471,4 +480,14 @@ function liveFunnel(deals: Deal[]): DashboardSummary["funnel"] {
   return (["new", "qualified", "contacted", "interested", "negotiation", "won"] as const).map((stage) => ({
     stage, label: STAGE_LABELS[stage], count: deals.filter((d) => d.stage === stage).length,
   }));
+}
+
+/* ---------- Creating and editing products (live organisations only: the demo catalogue is read-only) ---------- */
+
+export async function createProduct(input: ProductInput): Promise<Product | null> {
+  return (await isLiveOrg()) ? liveCreateProduct(input) : null;
+}
+
+export async function updateProduct(id: string, input: ProductInput): Promise<Product | null> {
+  return (await isLiveOrg()) ? liveUpdateProduct(id, input) : null;
 }

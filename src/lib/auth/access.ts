@@ -12,6 +12,22 @@ export class AuthError extends Error {
   }
 }
 
+/** A write that clashes with an existing record (for example a duplicate SKU). Becomes a 409. */
+export class ConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConflictError";
+  }
+}
+
+/** Turns an error thrown by the data layer into the right HTTP response (403 when Row Level Security refused, 409 on a clash).
+ *  Anything else is rethrown so it is not hidden. */
+export function errorResponse(e: unknown): NextResponse {
+  if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status, headers: { "Cache-Control": "no-store" } });
+  if (e instanceof ConflictError) return NextResponse.json({ error: e.message }, { status: 409, headers: { "Cache-Control": "no-store" } });
+  throw e;
+}
+
 /** Throws AuthError unless the caller is signed in, holds the permission, and belongs to an organisation. */
 export async function requireAccess(permission: Permission): Promise<AuthUser> {
   const user = await getAuthUser();

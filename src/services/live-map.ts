@@ -1,7 +1,8 @@
 /** Pure mapping between database rows and the app's types. No I/O, so it is tested without a database.
  *  The database uses UUIDs, timestamps and enums; the UI types carry display strings such as "Today". */
 import { temperatureFor } from "@/lib/agent-logic";
-import type { Activity, AgentKey, Approval, AuditEntry, Customer, Deal, PipelineStage, Priority, Retailer, Task, Temperature } from "@/types";
+import type { Activity, AgentKey, Approval, AuditEntry, Customer, Deal, PipelineStage, Priority, Product, Retailer, Task, Temperature } from "@/types";
+import type { SocialPlatform, SocialPost, SocialStatus } from "@/types/social";
 
 export interface TaskRow { id: string; title: string; source: string; due_at: string | null; priority: string; status: string; assignee_id: string | null; related_ref: string | null }
 export interface ApprovalRow { id: string; title: string; type: string; generated_by: string; status: string; preview: string; meta: unknown; created_at: string }
@@ -112,5 +113,40 @@ export function toDeal(l: LeadRow, r: RetailerRow, names: Map<string, string>, n
   return {
     id: l.id, retailerId: l.retailer_id, business: r.business, location: r.location ?? "", stage: asStage(l.stage),
     score: l.score ?? 0, owner: (l.owner_id && names.get(l.owner_id)) || "Unassigned", updated: ago(l.last_activity_at, now),
+  };
+}
+
+/* ---------- Products and content ---------- */
+
+export interface ProductRow { id: string; sku: string; name: string; category: string | null; price: number | string | null; stock: number | null; status: string; channels: string[] | null; created_at: string }
+export interface ContentRow {
+  id: string; platform: string; title: string; topic: string | null; caption: string | null; hashtags: string[] | null; creative_brief: string | null;
+  image_direction: string | null; scheduled_for: string | null; status: string; approval_id: string | null; created_at: string;
+}
+
+const PRODUCT_STATUS: readonly string[] = ["draft", "active", "low_stock", "archived"];
+
+export function toProduct(r: ProductRow): Product {
+  return {
+    id: r.id, sku: r.sku, name: r.name, category: r.category ?? "", price: r.price === null ? null : Number(r.price), stock: r.stock,
+    channels: r.channels ?? [], status: PRODUCT_STATUS.includes(r.status) ? (r.status as Product["status"]) : "draft",
+  };
+}
+
+/** Only these three platforms have a social composer; the other platforms the table allows (Pinterest, Email, Amazon A+) are not shown as posts. */
+export const SOCIAL_DB_PLATFORMS: readonly SocialPlatform[] = ["Instagram", "Facebook", "LinkedIn"];
+
+/** The database status is only a fallback: when the post has an approval, its status follows that approval (see deriveStatus).
+ *  The app never publishes, so a row marked "published" (a person did it by hand) is shown as approved. */
+const SOCIAL_STATUS: Record<string, SocialStatus> = { draft: "draft", pending_approval: "pending_approval", approved: "approved", rejected: "rejected", published: "approved" };
+
+export function toSocialPost(r: ContentRow): SocialPost {
+  return {
+    id: r.id, title: r.title, topic: r.topic ?? "", platform: r.platform as SocialPlatform, caption: r.caption ?? "", hashtags: r.hashtags ?? [],
+    creativeBrief: r.creative_brief ?? "", imageDirection: r.image_direction ?? "",
+    scheduledFor: r.scheduled_for ?? r.created_at.slice(0, 10), // an undated legacy row is placed on the day it was created
+    approvalId: r.approval_id ?? undefined, isSample: false, tone: "rose",
+    // "pending approval" with no approval behind it is a submission that never completed: nothing is waiting, so it is a draft again
+    seedStatus: r.status === "pending_approval" && !r.approval_id ? "draft" : (SOCIAL_STATUS[r.status] ?? "draft"),
   };
 }

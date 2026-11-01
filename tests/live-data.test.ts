@@ -11,6 +11,8 @@ const h = vi.hoisted(() => ({
   rpcCalls: [] as { fn: string; args: Record<string, unknown> }[],
   rpcResult: { data: null, error: null } as { data: unknown; error: { code?: string; message: string } | null },
   insertError: null as { code?: string; message: string } | null,
+  /** Makes a matching update fail with an error, or match no rows when it returns "empty". */
+  updateFault: null as null | ((table: string, payload: Record<string, unknown>) => { code?: string; message: string } | "empty" | null),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -31,6 +33,9 @@ vi.mock("@/lib/supabase/server", () => ({
         maybeSingle: () => { single = true; return q; },
         then: (resolve: (v: { data: unknown; error: unknown }) => void) => {
           if (call.op === "insert" && h.insertError) return resolve({ data: null, error: h.insertError });
+          const fault = call.op === "update" ? h.updateFault?.(table, call.payload ?? {}) : null;
+          if (fault === "empty") return resolve({ data: single ? null : [], error: null });
+          if (fault) return resolve({ data: null, error: fault });
           const all = h.tables[table] ?? [];
           const rows = call.op === "insert" ? [{ id: "new-1", source: "Manual", status: "open", assignee_id: null, ...call.payload }]
             : all.filter((r) => Object.entries(call.eq).every(([k, v]) => r[k] === v)).map((r) => (call.op === "update" ? { ...r, ...call.payload } : r));
@@ -57,7 +62,7 @@ beforeEach(() => {
   vi.stubEnv("AUTH_MODE", "required");
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.invalid");
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon-test");
-  h.calls.length = 0; h.rpcCalls.length = 0; h.insertError = null;
+  h.calls.length = 0; h.rpcCalls.length = 0; h.insertError = null; h.updateFault = null;
   h.rpcResult = { data: null, error: null };
   h.tables = {
     tasks: [{ id: "t1", org_id: ORG, title: "Call Asha", source: "CRM & Sales Ops Agent", due_at: null, priority: "high", status: "open", assignee_id: null, related_ref: null },
@@ -338,5 +343,261 @@ describe("slice 2: validation and mapping helpers", () => {
     expect(toCustomer({ id: "c", name: "N", instagram: null, phone: null, email: null, city: null, interests: null, created_at: stamp }, 0).interests).toEqual([]);
     const d = toDeal({ id: "l", retailer_id: "r", stage: "bogus", score: null, temperature: null, owner_id: null, last_activity_at: stamp }, row, new Map());
     expect(d).toMatchObject({ stage: "new", score: 0, owner: "Unassigned" });
+  });
+});
+
+/* ---------- Slice 3: products and content items (fake client: proves app logic, not the real database) ---------- */
+import { PATCH as patchResource } from "@/app/api/[resource]/[id]/route";
+import { POST as postSocial } from "@/app/api/social/posts/route";
+import { POST as postSocialAction } from "@/app/api/social/posts/[id]/[action]/route";
+import { createProduct, getProduct, getProducts, getSocialPosts, updateProduct } from "@/services";
+import { parseProductInput } from "@/lib/validate";
+import { toProduct, toSocialPost } from "@/services/live-map";
+
+const P1 = "88888888-8888-4888-8888-888888888888";
+const P_OTHER = "99999999-9999-4999-8999-999999999999";
+const POST1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const POST_PENDING = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const POST_OTHER = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const APPROVAL_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const json = { host: "app.test", origin: "https://app.test", "content-type": "application/json" };
+const jreq = (method: string, url: string, body?: unknown) => new Request(url, { method, headers: json, body: body === undefined ? undefined : JSON.stringify(body) });
+const postProduct = (body: unknown) => postResource(jreq("POST", "https://app.test/api/products", body), { params: Promise.resolve({ resource: "products" }) });
+const patchProduct = (id: string, body: unknown) => patchResource(jreq("PATCH", `https://app.test/api/products/${id}`, body), { params: Promise.resolve({ resource: "products", id }) });
+const postAction = (id: string, action: string, body?: unknown) => postSocialAction(jreq("POST", `https://app.test/api/social/posts/${id}/${action}`, body), { params: Promise.resolve({ id, action }) });
+const setRole = (role: string) => { h.tables.memberships = [{ user_id: "u1", org_id: ORG, role, organizations: { is_demo: false } }]; };
+
+const productRow = (over: Row) => ({ id: P1, org_id: ORG, sku: "CC-001", name: "Mini hoop", category: "Earrings", price: "1499.00", stock: 12, status: "active", channels: ["Website"], created_at: stamp, ...over });
+const contentRow = (over: Row) => ({
+  id: POST1, org_id: ORG, platform: "Instagram", title: "Everyday stack", topic: "Layering", caption: "A calm everyday stack.", hashtags: ["#CheriAndCo"],
+  creative_brief: "Soft light", image_direction: "Flat lay", scheduled_for: "2026-11-10", status: "draft", approval_id: null, created_at: stamp, ...over,
+});
+const seedCatalogue = () => {
+  h.tables.products = [productRow({}), productRow({ id: P_OTHER, org_id: "other-org", name: "Not mine", sku: "X-1" })];
+  h.tables.content_items = [
+    contentRow({}),
+    contentRow({ id: POST_PENDING, title: "Waiting", status: "pending_approval", approval_id: APPROVAL_ID }),
+    contentRow({ id: POST_OTHER, org_id: "other-org", title: "Other org post" }),
+  ];
+  h.tables.approvals = [...(h.tables.approvals ?? []), { id: APPROVAL_ID, org_id: ORG, title: "Waiting · Instagram post", type: "Content", generated_by: "content", status: "approved", preview: "x", meta: null, created_at: stamp }];
+};
+
+describe("slice 3: live products", () => {
+  beforeEach(seedCatalogue);
+
+  it("lists only this organisation's products, mapped to the schema's columns", async () => {
+    h.calls.length = 0;
+    const list = await getProducts();
+    expect(list.map((p) => p.name)).toEqual(["Mini hoop"]);
+    expect(list[0]).toMatchObject({ sku: "CC-001", price: 1499, stock: 12, status: "active", channels: ["Website"] });
+    expect(h.calls.filter((c) => c.table === "products").every((c) => c.eq.org_id === ORG)).toBe(true);
+  });
+  it("keeps an unset price and stock as null instead of inventing a number, and shows archived", () => {
+    expect(toProduct(productRow({ price: null, stock: null, status: "archived", category: null, channels: null }) as never))
+      .toMatchObject({ price: null, stock: null, status: "archived", category: "", channels: [] });
+  });
+  it("product detail finds own products only", async () => {
+    expect((await getProduct(P1))?.sku).toBe("CC-001");
+    expect(await getProduct(P_OTHER)).toBeNull();
+    expect(await getProduct("not-a-uuid")).toBeNull();
+  });
+  it("search includes this organisation's products", async () => {
+    const hit = (await getSearchIndex()).find((s) => s.label === "Mini hoop");
+    expect(hit).toMatchObject({ hint: "Product", href: `/products/${P1}` });
+    expect((await getSearchIndex()).some((s) => s.label === "Not mine")).toBe(false);
+  });
+  it("creates a product in the session's organisation with only the table's columns", async () => {
+    h.calls.length = 0;
+    const res = await postProduct({ sku: "CC-002", name: "Pearl drop", price: "2499.5", stock: "4", status: "active", channels: "Website, Amazon", org_id: "attacker-org", reach: 99 });
+    expect(res.status).toBe(201);
+    const ins = h.calls.find((c) => c.table === "products" && c.op === "insert")!;
+    expect(ins.payload).toEqual({ org_id: ORG, sku: "CC-002", name: "Pearl drop", category: null, price: 2499.5, stock: 4, status: "active", channels: ["Website", "Amazon"] });
+  });
+  it("rejects invalid products with 400 and writes nothing", async () => {
+    h.calls.length = 0;
+    for (const bad of [{}, { sku: "A" }, { name: "A" }, { sku: "A", name: "B", price: -1 }, { sku: "A", name: "B", price: "abc" }, { sku: "A", name: "B", stock: 1.5 },
+      { sku: "A", name: "B", stock: -2 }, { sku: "A", name: "B", status: "sold" }, { sku: "A", name: "B", channels: [1] }, { sku: "A".repeat(65), name: "B" }]) {
+      expect((await postProduct(bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(h.calls.filter((c) => c.op === "insert")).toEqual([]);
+  });
+  it("a duplicate SKU is a 409, not a crash", async () => {
+    h.insertError = { code: "23505", message: "duplicate key value violates unique constraint" };
+    expect((await postProduct({ sku: "CC-001", name: "Again" })).status).toBe(409);
+  });
+  it("edits a product only inside the organisation", async () => {
+    h.calls.length = 0;
+    const res = await patchProduct(P1, { sku: "CC-001", name: "Mini hoop XL", price: 1599, status: "low_stock" });
+    expect(res.status).toBe(200);
+    const upd = h.calls.find((c) => c.table === "products" && c.op === "update")!;
+    expect(upd.eq).toMatchObject({ org_id: ORG, id: P1 });
+    expect(upd.payload).not.toHaveProperty("org_id");
+    expect((await patchProduct(P_OTHER, { sku: "X", name: "Hijack" })).status).toBe(404);
+    expect((await patchProduct(P1, { sku: "", name: "x" })).status).toBe(400);
+  });
+  it("only owner, admin, approver and staff may write; a viewer gets 403", async () => {
+    for (const role of ["owner", "admin", "approver", "staff"]) { setRole(role); expect((await postProduct({ sku: "S", name: "N" })).status, role).toBe(201); }
+    setRole("viewer");
+    expect((await postProduct({ sku: "S", name: "N" })).status).toBe(403);
+    expect((await patchProduct(P1, { sku: "S", name: "N" })).status).toBe(403);
+  });
+  it("a database refusal (RLS) becomes a 403", async () => {
+    h.insertError = { code: "42501", message: "new row violates row-level security policy" };
+    expect((await postProduct({ sku: "S", name: "N" })).status).toBe(403);
+  });
+  it("a demo organisation keeps the sample catalogue and cannot create or edit", async () => {
+    setMembership(true);
+    expect((await getProducts()).some((p) => p.id === P1)).toBe(false);
+    expect((await getProducts()).length).toBeGreaterThan(0);
+    expect(await createProduct({ sku: "S", name: "N", category: null, price: null, stock: null, status: "draft", channels: [] })).toBeNull();
+    expect(await updateProduct(P1, { sku: "S", name: "N", category: null, price: null, stock: null, status: "draft", channels: [] })).toBeNull();
+    expect((await postProduct({ sku: "S", name: "N" })).status).toBe(404);
+  });
+  it("validation helper clamps to the table's limits", () => {
+    expect(parseProductInput({ sku: " A ", name: " B " })).toEqual({ sku: "A", name: "B", category: null, price: null, stock: null, status: "draft", channels: [] });
+    expect(parseProductInput({ sku: "A", name: "B", price: 100_000_000 })).toBeNull();
+    expect(parseProductInput({ sku: "A", name: "B", price: "12.345" })?.price).toBe(12.35);
+  });
+});
+
+describe("slice 3: live content calendar and approval workflow", () => {
+  beforeEach(seedCatalogue);
+
+  it("lists only this organisation's posts; a post's status follows its approval", async () => {
+    const posts = await getSocialPosts();
+    expect(posts.map((p) => p.title).sort()).toEqual(["Everyday stack", "Waiting"]);
+    expect(posts.find((p) => p.id === POST1)).toMatchObject({ status: "draft", platform: "Instagram", scheduledFor: "2026-11-10", isSample: false, hashtags: ["#CheriAndCo"] });
+    expect(posts.find((p) => p.id === POST_PENDING)!.status).toBe("approved"); // the approval was approved, whatever the stored status says
+    expect(posts.every((p) => p.metrics === undefined)).toBe(true); // no engagement numbers exist in the schema
+  });
+  it("scopes content queries by organisation and falls back safely on odd rows", () => {
+    expect(toSocialPost(contentRow({ scheduled_for: null, status: "published", topic: null, caption: null, hashtags: null }) as never))
+      .toMatchObject({ scheduledFor: stamp.slice(0, 10), seedStatus: "approved", topic: "", caption: "", hashtags: [] });
+  });
+  it("creates a draft in the session's organisation with a default planned date", async () => {
+    h.calls.length = 0;
+    const res = await postSocial(jreq("POST", "https://app.test/api/social/posts", { title: "New post", platform: "LinkedIn", caption: "Hello", hashtags: "#a #b", org_id: "attacker-org", status: "approved" }));
+    expect(res.status).toBe(201);
+    const ins = h.calls.find((c) => c.table === "content_items" && c.op === "insert")!;
+    expect(ins.payload).toMatchObject({ org_id: ORG, platform: "LinkedIn", title: "New post", status: "draft", hashtags: ["#a", "#b"] });
+    expect(ins.payload!.scheduled_for).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(ins.payload).not.toHaveProperty("approval_id");
+  });
+  it("rejects a post with no title or an unsupported platform", async () => {
+    h.calls.length = 0;
+    expect((await postSocial(jreq("POST", "https://app.test/api/social/posts", { platform: "Instagram" }))).status).toBe(400);
+    expect((await postSocial(jreq("POST", "https://app.test/api/social/posts", { title: "x", platform: "TikTok" }))).status).toBe(400);
+    expect(h.calls.filter((c) => c.op === "insert")).toEqual([]);
+  });
+  it("edits a draft (and resets it to a draft with no approval); refuses pending or foreign posts", async () => {
+    h.calls.length = 0;
+    const res = await postAction(POST1, "edit", { title: "Renamed", platform: "Instagram", caption: "New caption" });
+    expect(res.status).toBe(200);
+    const upd = h.calls.find((c) => c.table === "content_items" && c.op === "update")!;
+    expect(upd.eq).toMatchObject({ org_id: ORG, id: POST1 });
+    expect(upd.payload).toMatchObject({ title: "Renamed", status: "draft", approval_id: null });
+    h.tables.approvals = h.tables.approvals!.map((a) => (a.id === APPROVAL_ID ? { ...a, status: "pending" } : a));
+    expect((await postAction(POST_PENDING, "edit", { title: "x", platform: "Instagram" })).status).toBe(409);
+    expect((await postAction(POST_OTHER, "edit", { title: "x", platform: "Instagram" })).status).toBe(404);
+    expect((await postAction(POST1, "edit", { platform: "Instagram" })).status).toBe(400);
+  });
+  it("submitting claims the draft, queues a pending approval and links it; nothing is published", async () => {
+    h.calls.length = 0;
+    const res = await postAction(POST1, "submit");
+    expect(res.status).toBe(200);
+    const writes = h.calls.filter((c) => c.op !== "select").map((c) => `${c.table}:${c.op}`);
+    expect(writes.slice(0, 3)).toEqual(["content_items:update", "approvals:insert", "content_items:update"]);
+    const claim = h.calls.find((c) => c.table === "content_items" && c.op === "update")!;
+    expect(claim.eq).toMatchObject({ org_id: ORG, id: POST1, status: "draft" });
+    expect(claim.payload).toEqual({ status: "pending_approval" });
+    const approval = h.calls.find((c) => c.table === "approvals" && c.op === "insert")!;
+    expect(approval.payload).toMatchObject({ org_id: ORG, type: "Content", generated_by: "content", status: "pending", meta: { kind: "content_draft", isSample: false, allowedClaims: [] } });
+    expect(JSON.stringify(approval.payload)).not.toContain('"status":"published"');
+    expect(((await res.json()) as { data: { status: string } }).data.status).toBe("pending_approval");
+  });
+  it("the claim guard blocks a draft with a price or discount before anything is written", async () => {
+    h.tables.content_items = [contentRow({ caption: "Flat 50% off today, only 3 left in stock" })];
+    h.calls.length = 0;
+    const res = await postAction(POST1, "submit");
+    expect(res.status).toBe(422);
+    expect(h.calls.filter((c) => c.op !== "select")).toEqual([]);
+  });
+  it("refuses to submit an empty caption, a non-draft, or another organisation's post", async () => {
+    h.tables.content_items = [contentRow({ caption: null }), contentRow({ id: POST_PENDING, status: "pending_approval", approval_id: APPROVAL_ID })];
+    h.tables.approvals = [{ id: APPROVAL_ID, org_id: ORG, title: "t", type: "Content", generated_by: "content", status: "pending", preview: "x", meta: null, created_at: stamp }];
+    expect((await postAction(POST1, "submit")).status).toBe(409);
+    expect((await postAction(POST_PENDING, "submit")).status).toBe(409);
+    expect((await postAction(POST_OTHER, "submit")).status).toBe(404);
+  });
+  it("a viewer cannot create, edit or submit posts", async () => {
+    setRole("viewer");
+    expect((await postSocial(jreq("POST", "https://app.test/api/social/posts", { title: "x", platform: "Instagram" }))).status).toBe(403);
+    expect((await postAction(POST1, "edit", { title: "x", platform: "Instagram" })).status).toBe(403);
+    expect((await postAction(POST1, "submit")).status).toBe(403);
+  });
+  it("simulated publishing is not available to a live organisation", async () => {
+    h.tables.approvals = h.tables.approvals!.map((a) => (a.id === APPROVAL_ID ? { ...a, status: "approved" } : a));
+    h.calls.length = 0;
+    expect((await postAction(POST_PENDING, "publish")).status).toBe(409);
+    expect(h.calls.filter((c) => c.op !== "select")).toEqual([]);
+  });
+  it("deciding a content approval keeps the post's stored status in step", async () => {
+    h.tables.approvals = [{ id: APPROVAL_ID, org_id: ORG, title: "t", type: "Content", generated_by: "content", status: "pending", preview: "Soft light everyday stack", meta: { kind: "content_draft", subject: "x", isSample: false, allowedClaims: [] }, created_at: stamp }];
+    h.rpcResult = { data: { id: APPROVAL_ID, title: "t", type: "Content", generated_by: "content", status: "rejected", preview: "x", meta: null, created_at: stamp }, error: null };
+    h.calls.length = 0;
+    expect(await decideApproval(APPROVAL_ID, "reject", "x", "needs work")).toMatchObject({ ok: true });
+    const sync = h.calls.find((c) => c.table === "content_items" && c.op === "update")!;
+    expect(sync.payload).toEqual({ status: "rejected" });
+    expect(sync.eq).toMatchObject({ org_id: ORG, approval_id: APPROVAL_ID });
+  });
+  it("the orchestrator reports real planned-post counts for content", async () => {
+    expect((await getOrchestratorBrief()).agents.find((a) => a.key === "content")!.headline).toBe("2 planned posts, 0 awaiting approval");
+  });
+  it("a demo organisation sees sample posts, not live rows, and live-only sections stay empty for live", async () => {
+    setMembership(true);
+    expect((await getSocialPosts()).some((p) => p.id === POST1)).toBe(false);
+    expect((await getSocialPosts()).every((p) => p.isSample || p.id.startsWith("sp-"))).toBe(true);
+    setMembership(false);
+    expect((await getSocialPosts()).some((p) => p.isSample)).toBe(false);
+  });
+});
+
+describe("slice 3: a submission that cannot be completed", () => {
+  beforeEach(seedCatalogue);
+  const linkFault = (fault: { code?: string; message: string } | "empty") => { h.updateFault = (t, payload) => (t === "content_items" && "approval_id" in payload ? fault : null); };
+
+  it("if the approval cannot be linked, the post goes back to a draft and the unlinked approval is rejected through decide_approval", async () => {
+    linkFault({ code: "XX000", message: "boom" });
+    h.calls.length = 0;
+    await expect(postAction(POST1, "submit")).rejects.toBeDefined();
+    const updates = h.calls.filter((c) => c.table === "content_items" && c.op === "update").map((c) => c.payload);
+    expect(updates).toContainEqual({ status: "draft" });
+    expect(h.rpcCalls).toHaveLength(1);
+    expect(h.rpcCalls[0]).toMatchObject({ fn: "decide_approval", args: { p_id: "new-1", p_action: "reject" } });
+    expect(h.calls.some((c) => c.table === "approvals" && (c.op === "update" || c.op === "delete"))).toBe(false); // approvals are never touched directly
+  });
+  it("a link that matches no row (post removed meanwhile) is a 404, not a false success, and is undone the same way", async () => {
+    linkFault("empty");
+    h.rpcCalls.length = 0;
+    expect((await postAction(POST1, "submit")).status).toBe(404);
+    expect(h.rpcCalls[0]).toMatchObject({ fn: "decide_approval", args: { p_action: "reject" } });
+  });
+  it("a role that may not decide approvals still gets the post back as a draft (the unlinked approval then stays pending)", async () => {
+    linkFault({ code: "XX000", message: "boom" });
+    h.rpcResult = { data: null, error: { code: "42501", message: "not authorized" } };
+    h.calls.length = 0;
+    await expect(postAction(POST1, "submit")).rejects.toBeDefined();
+    expect(h.calls.some((c) => c.table === "content_items" && c.op === "update" && c.payload?.status === "draft")).toBe(true);
+  });
+  it("a post stuck at pending approval with no approval behind it shows as a draft and can be edited", async () => {
+    h.tables.content_items = [contentRow({ status: "pending_approval", approval_id: null })];
+    expect((await getSocialPosts())[0].status).toBe("draft");
+    expect((await postAction(POST1, "edit", { title: "Fixed", platform: "Instagram", caption: "ok" })).status).toBe(200);
+  });
+  it("if claiming the draft is refused by the database, nothing else is written", async () => {
+    h.updateFault = (t, payload) => (t === "content_items" && payload.status === "pending_approval" ? { code: "42501", message: "row-level security" } : null);
+    h.calls.length = 0;
+    expect((await postAction(POST1, "submit")).status).toBe(403);
+    expect(h.calls.some((c) => c.table === "approvals" && c.op === "insert")).toBe(false);
   });
 });

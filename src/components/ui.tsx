@@ -57,7 +57,7 @@ const BADGE: Record<string, [string, string]> = {
   positive: ["sage", "Positive"], neutral: ["", "Neutral"], negative: ["danger", "Negative"],
   // agents
   active: ["sage", "Active"], idle: ["", "Idle"], attention: ["champagne", "Needs you"],
-  low_stock: ["champagne", "Low stock"],
+  low_stock: ["champagne", "Low stock"], archived: ["", "Archived"],
 };
 
 export function StatusBadge({ status, label }: { status: string; label?: string }) {
