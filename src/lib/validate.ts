@@ -1,5 +1,6 @@
 /** Minimal input validation for API routes (no extra dependency). */
-import type { PipelineStage, Priority } from "@/types";
+import { ORDER_CHANNELS, ORDER_STATUSES } from "@/types";
+import type { OrderChannel, OrderStatus, PipelineStage, Priority } from "@/types";
 
 export const STAGES: PipelineStage[] = ["new", "qualified", "contacted", "interested", "negotiation", "won", "lost"];
 export const PRIORITIES: Priority[] = ["high", "medium", "low"];
@@ -67,4 +68,33 @@ export function parseProductInput(b: Record<string, unknown> | null): ProductInp
   if (!sku || !name || category === undefined || price === undefined || stock === undefined || channels === null || channels.some((c) => c.length > 40)) return null;
   if (typeof status !== "string" || !(PRODUCT_STATUSES as readonly string[]).includes(status)) return null;
   return { sku, name, category, price, stock, status: status as ProductStatus, channels };
+}
+
+export interface OrderInput { customerId: string | null; retailerId: string | null; channel: OrderChannel; status: OrderStatus; total: number; lineItems: Record<string, unknown>[]; orderedAt: string | null }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const isOrderStatus = (v: unknown): v is OrderStatus => typeof v === "string" && (ORDER_STATUSES as readonly string[]).includes(v);
+
+/** Optional id: blank is null, a malformed value is invalid (undefined). The composite foreign key then proves it belongs to the same organisation. */
+const optId = (v: unknown): string | null | undefined =>
+  v === undefined || v === null || v === "" ? null : typeof v === "string" && UUID_RE.test(v) ? v : undefined;
+
+/** The columns of `orders`, nothing more. total is numeric(12,2) >= 0 and defaults to 0; line_items is a JSON array whose item shape the table does not define. */
+export function parseOrderInput(b: Record<string, unknown> | null): OrderInput | null {
+  const customerId = optId(b?.customerId);
+  const retailerId = optId(b?.retailerId);
+  const channel = b?.channel;
+  const status = b?.status === undefined || b.status === "" ? "new" : b.status;
+  const total = b?.total === undefined || b.total === null || b.total === "" ? 0 : typeof b.total === "number" ? b.total : typeof b.total === "string" ? Number(b.total) : NaN;
+  const items = b?.lineItems === undefined || b.lineItems === null ? [] : b.lineItems;
+  const orderedAt = b?.orderedAt === undefined || b.orderedAt === null || b.orderedAt === "" ? null : b.orderedAt;
+  if (customerId === undefined || retailerId === undefined) return null;
+  if (typeof channel !== "string" || !(ORDER_CHANNELS as readonly string[]).includes(channel) || !isOrderStatus(status)) return null;
+  if (!Number.isFinite(total) || total < 0 || total > 9_999_999_999.99) return null;
+  if (!Array.isArray(items) || items.length > 100 || !items.every((i) => i !== null && typeof i === "object" && !Array.isArray(i)) || JSON.stringify(items).length > 20_000) return null;
+  if (orderedAt !== null && (typeof orderedAt !== "string" || Number.isNaN(Date.parse(orderedAt)))) return null;
+  return {
+    customerId, retailerId, channel: channel as OrderChannel, status, total: Math.round(total * 100) / 100,
+    lineItems: items as Record<string, unknown>[], orderedAt: orderedAt === null ? null : new Date(orderedAt as string).toISOString(),
+  };
 }

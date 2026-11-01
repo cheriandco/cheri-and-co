@@ -239,3 +239,77 @@ describe("products and content items (real SQL in PGlite, not the hosted project
     expect((await rows(`select status from public.approvals where id = '${APP_A}'`))[0].status).toBe("approved");
   });
 });
+
+describe("orders (real SQL in PGlite, not the hosted project)", () => {
+  const CUST_A = "ffffffff-1111-0000-0000-000000000001";
+  const CUST_B = "ffffffff-1111-0000-0000-000000000002";
+  const RET_B = "ffffffff-2222-0000-0000-000000000001";
+  const ORD_A = "ffffffff-3333-0000-0000-000000000001";
+  const ORD_B = "ffffffff-3333-0000-0000-000000000002";
+  beforeAll(async () => {
+    await db.exec(`
+      insert into public.customers (id, org_id, name) values ('${CUST_A}', '${ORG_A}', 'Order customer A'), ('${CUST_B}', '${ORG_B}', 'Order customer B');
+      insert into public.retailers (id, org_id, business) values ('${RET_B}', '${ORG_B}', 'Retailer B');
+      insert into public.orders (id, org_id, customer_id, channel, total) values ('${ORD_A}', '${ORG_A}', '${CUST_A}', 'instagram', 1500), ('${ORD_B}', '${ORG_B}', '${CUST_B}', 'amazon', 900);
+    `);
+  });
+
+  it("members read only their own organisation's orders", async () => {
+    expect((await as(U.viewerA, () => rows("select id from public.orders"))).map((r) => r.id)).toEqual([ORD_A]);
+    expect((await as(U.ownerB, () => rows("select id from public.orders"))).map((r) => r.id)).toEqual([ORD_B]);
+    expect(await as(U.loner, () => rows("select id from public.orders"))).toEqual([]);
+  });
+  it("a new order defaults to status new, total 0 and no line items", async () => {
+    await as(U.staffA, () => db.query(`insert into public.orders (id, org_id, channel) values ('ffffffff-3333-0000-0000-000000000009', '${ORG_A}', 'other')`));
+    expect((await rows("select status, total, line_items from public.orders where id = 'ffffffff-3333-0000-0000-000000000009'"))[0]).toEqual({ status: "new", total: "0.00", line_items: [] });
+  });
+  it("writers can create and change status; a viewer can do neither", async () => {
+    await as(U.staffA, () => db.query(`update public.orders set status = 'shipped' where id = '${ORD_A}'`));
+    expect((await rows(`select status from public.orders where id = '${ORD_A}'`))[0].status).toBe("shipped");
+    expect(await as(U.viewerA, () => fails(`insert into public.orders (org_id, channel) values ('${ORG_A}', 'b2b')`))).toMatch(/row-level security/);
+    await as(U.viewerA, () => db.query(`update public.orders set status = 'cancelled' where id = '${ORD_A}'`));
+    expect((await rows(`select status from public.orders where id = '${ORD_A}'`))[0].status).toBe("shipped");
+  });
+  it("cannot create, edit or move orders across organisations", async () => {
+    expect(await as(U.ownerA, () => fails(`insert into public.orders (org_id, channel) values ('${ORG_B}', 'b2b')`))).toMatch(/row-level security/);
+    await as(U.ownerA, () => db.query(`update public.orders set status = 'returned' where id = '${ORD_B}'`));
+    expect((await rows(`select status from public.orders where id = '${ORD_B}'`))[0].status).toBe("new");
+    expect(await as(U.ownerA, () => fails(`update public.orders set org_id = '${ORG_B}' where id = '${ORD_A}'`))).toMatch(/row-level security/);
+  });
+  it("an order cannot point at another organisation's customer or retailer", async () => {
+    expect(await as(U.staffA, () => fails(`insert into public.orders (org_id, channel, customer_id) values ('${ORG_A}', 'b2b', '${CUST_B}')`))).toMatch(/foreign key/);
+    expect(await as(U.staffA, () => fails(`insert into public.orders (org_id, channel, retailer_id) values ('${ORG_A}', 'b2b', '${RET_B}')`))).toMatch(/foreign key/);
+    expect(await as(U.staffA, () => fails(`update public.orders set customer_id = '${CUST_B}' where id = '${ORD_A}'`))).toMatch(/foreign key/);
+  });
+  it("the table's checks reject unknown channels and statuses and negative totals", async () => {
+    for (const bad of ["channel = 'tiktok'", "status = 'lost'", "total = -1"]) {
+      expect(await as(U.staffA, () => fails(`update public.orders set ${bad} where id = '${ORD_A}'`)), bad).toMatch(/check constraint/);
+    }
+  });
+  it("only owner or admin can delete orders", async () => {
+    await as(U.staffA, () => db.query("delete from public.orders where id = 'ffffffff-3333-0000-0000-000000000009'"));
+    expect((await rows("select 1 from public.orders where id = 'ffffffff-3333-0000-0000-000000000009'")).length).toBe(1);
+    await as(U.ownerA, () => db.query("delete from public.orders where id = 'ffffffff-3333-0000-0000-000000000009'"));
+    expect((await rows("select 1 from public.orders where id = 'ffffffff-3333-0000-0000-000000000009'")).length).toBe(0);
+  });
+  it("deleting a customer keeps the order and clears only the customer link", async () => {
+    await db.exec(`delete from public.customers where id = '${CUST_A}'`);
+    expect((await rows(`select customer_id, total from public.orders where id = '${ORD_A}'`))[0]).toEqual({ customer_id: null, total: "1500.00" });
+  });
+});
+
+describe("order rules in SQL (same statuses the app filters on; PGlite, not the hosted project)", () => {
+  it("delivered revenue and purchase counts are scoped to the member's organisation by RLS alone", async () => {
+    const A = "ffffffff-4444-0000-0000-00000000000";
+    await db.exec(`
+      insert into public.orders (id, org_id, channel, status, total) values
+        ('${A}1', '${ORG_A}', 'b2b', 'delivered', 100.25), ('${A}2', '${ORG_A}', 'b2b', 'delivered', 50),
+        ('${A}3', '${ORG_A}', 'b2b', 'paid', 999), ('${A}4', '${ORG_A}', 'b2b', 'cancelled', 999), ('${A}5', '${ORG_A}', 'b2b', 'returned', 999),
+        ('${A}6', '${ORG_B}', 'b2b', 'delivered', 7777);
+    `);
+    const revenue = await as(U.viewerA, () => rows("select sum(total) as s, count(*) as n from public.orders where status = 'delivered' and id::text like 'ffffffff-4444%'"));
+    expect(revenue[0]).toEqual({ s: "150.25", n: 2 });
+    const purchases = await as(U.viewerA, () => rows("select count(*) as n from public.orders where status not in ('cancelled', 'returned') and id::text like 'ffffffff-4444%'"));
+    expect(purchases[0]).toEqual({ n: 3 });
+  });
+});

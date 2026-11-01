@@ -288,9 +288,12 @@ export interface User {
 export interface ReportSection {
   id: string;
   label: string;
-  metrics: { label: string; value: string; change: number }[];
+  /** `change` is null when there is nothing to compare with (for example no sales in the previous period). */
+  metrics: { label: string; value: string; change: number | null }[];
   series: { label: string; value: number }[];
   seriesTitle: string;
+  /** How the figures are defined, shown under the cards. Only set for live data. */
+  note?: string;
 }
 
 export interface DashboardSummary {
@@ -304,4 +307,21 @@ export interface DashboardSummary {
   approvals: Approval[];
   amazon: AmazonRow[];
   tasks: Task[];
+}
+
+export const ORDER_CHANNELS = ["instagram", "amazon", "flipkart", "b2b", "other"] as const;
+export type OrderChannel = (typeof ORDER_CHANNELS)[number];
+export const ORDER_STATUSES = ["new", "paid", "shipped", "delivered", "cancelled", "returned"] as const;
+export type OrderStatus = (typeof ORDER_STATUSES)[number];
+
+/** One row of the `orders` table. `lineItems` is free-form JSON: the schema defines no shape for it. */
+export interface Order {
+  id: string;
+  customerId: string | null;
+  retailerId: string | null;
+  channel: OrderChannel;
+  status: OrderStatus;
+  total: number;
+  lineItems: Record<string, unknown>[];
+  orderedAt: string;
 }

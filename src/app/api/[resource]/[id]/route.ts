@@ -1,7 +1,7 @@
 import { deny, errorResponse } from "@/lib/auth/access";
 import { NextResponse } from "next/server";
 import * as s from "@/services";
-import { isStage, parseProductInput, readJson, str } from "@/lib/validate";
+import { isOrderStatus, isStage, parseProductInput, readJson, str } from "@/lib/validate";
 
 type Ctx = { params: Promise<{ resource: string; id: string }> };
 
@@ -13,6 +13,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     resource === "customers" ? await s.getCustomer(id)
     : resource === "retailers" || resource === "leads" ? await s.getRetailer(id)
     : resource === "products" ? await s.getProduct(id)
+    : resource === "orders" ? await s.getOrder(id)
     : undefined;
   if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json(row);
@@ -20,11 +21,18 @@ export async function GET(_req: Request, ctx: Ctx) {
 
 export async function PATCH(req: Request, ctx: Ctx) {
   const { resource, id } = await ctx.params;
-  const denied = await deny(resource === "products" ? "products:write" : "pipeline:write", req);
+  const denied = await deny(resource === "products" ? "products:write" : resource === "orders" ? "orders:write" : "pipeline:write", req);
   if (denied) return denied;
   const body = await readJson(req);
   if (!body) return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
 
+  if (resource === "orders") {
+    if (!isOrderStatus(body.status)) return NextResponse.json({ error: "Invalid status" }, { status: 400 });
+    try {
+      const order = await s.updateOrderStatus(id, body.status);
+      return order ? NextResponse.json(order) : NextResponse.json({ error: "Not found" }, { status: 404 });
+    } catch (e) { return errorResponse(e); }
+  }
   if (resource === "products") {
     const input = parseProductInput(body);
     if (!input) return NextResponse.json({ error: "Invalid product" }, { status: 400 });

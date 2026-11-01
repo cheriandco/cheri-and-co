@@ -1,7 +1,7 @@
 import { deny, errorResponse } from "@/lib/auth/access";
 import { NextResponse } from "next/server";
 import * as s from "@/services";
-import { isPriority, parseCustomerInput, parseProductInput, parseRetailerInput, readJson, str } from "@/lib/validate";
+import { isPriority, parseCustomerInput, parseOrderInput, parseProductInput, parseRetailerInput, readJson, str } from "@/lib/validate";
 
 /** Read-only collection endpoints share one handler; unknown resources 404. */
 const readers: Record<string, () => Promise<unknown>> = {
@@ -10,6 +10,7 @@ const readers: Record<string, () => Promise<unknown>> = {
   retailers: s.getRetailers,
   conversations: s.getConversations,
   products: s.getProducts,
+  orders: s.getOrders,
   content: s.getContent,
   tasks: s.getTasks,
   approvals: s.getApprovals,
@@ -27,9 +28,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ resource: stri
 
 export async function POST(req: Request, ctx: { params: Promise<{ resource: string }> }) {
   const { resource } = await ctx.params;
-  const denied = await deny(resource === "tasks" ? "tasks:write" : resource === "products" ? "products:write" : "pipeline:write", req);
+  const denied = await deny(resource === "tasks" ? "tasks:write" : resource === "products" ? "products:write" : resource === "orders" ? "orders:write" : "pipeline:write", req);
   if (denied) return denied;
-  if (resource === "customers" || resource === "retailers" || resource === "products") {
+  if (resource === "customers" || resource === "retailers" || resource === "products" || resource === "orders") {
     try { return await createRecord(resource, await readJson(req)); } catch (e) { return errorResponse(e); }
   }
   if (resource !== "tasks") return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -42,9 +43,15 @@ export async function POST(req: Request, ctx: { params: Promise<{ resource: stri
   return NextResponse.json(await s.createTask({ title, due, assignee, priority }), { status: 201 });
 }
 
-/** Customers, retailers and products can be created only in a live organisation (the sample demo is read-only here, so it 404s as before).
+/** Customers, retailers, products and orders can be created only in a live organisation (the sample demo is read-only here, so it 404s as before).
  *  The organisation is taken from the session by the service, never from this body. */
-async function createRecord(resource: "customers" | "retailers" | "products", body: Record<string, unknown> | null) {
+async function createRecord(resource: "customers" | "retailers" | "products" | "orders", body: Record<string, unknown> | null) {
+  if (resource === "orders") {
+    const input = parseOrderInput(body);
+    if (!input) return NextResponse.json({ error: "Invalid order" }, { status: 400 });
+    const created = await s.createOrder(input);
+    return created ? NextResponse.json(created, { status: 201 }) : NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   if (resource === "products") {
     const input = parseProductInput(body);
     if (!input) return NextResponse.json({ error: "Invalid product" }, { status: 400 });

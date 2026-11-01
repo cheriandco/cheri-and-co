@@ -12,13 +12,13 @@ import { DISCOVERY_NOTE, discoveryCandidates, type DiscoveryCandidate } from "@/
 import { amazonActionFor, buildSuggestions, followUpEmail, scoreCandidate, suggestedReplyFor, temperatureFor, type Suggestion } from "@/lib/agent-logic";
 import { AGENT_NAMES, STAGE_LABELS } from "@/lib/agents";
 import { renderDraft } from "@/lib/content-agent/render";
-import type { CustomerInput, ProductInput, RetailerInput } from "@/lib/validate";
+import type { CustomerInput, OrderInput, ProductInput, RetailerInput } from "@/lib/validate";
 import {
   liveCreateCustomer, liveCreateProduct, liveCreateRetailer, liveCreateSocialPost, liveCreateTask, liveCustomer, liveCustomers, liveDecideApproval,
-  liveMoveDeal, liveProduct, liveProducts, liveSocialPosts, liveSubmitSocialPost, liveUpdateProduct, liveUpdateSocialPost, liveUpdateTask,
+  liveCreateOrder, liveMoveDeal, liveSalesReport, liveOrder, liveOrders, liveProduct, liveProducts, liveSocialPosts, liveSubmitSocialPost, liveUpdateOrderStatus, liveUpdateProduct, liveUpdateSocialPost, liveUpdateTask,
 } from "./live";
 import { readStore, writableStore, type Store } from "./store";
-import type { Product,
+import type { Product, Order, OrderStatus,
   Activity, AgentKey, Approval, AuditEntry, Conversation, Customer, DashboardSummary, Deal, PipelineStage,
   ReportSection, Retailer, Task,
 } from "@/types";
@@ -273,7 +273,8 @@ export async function moveDeal(id: string, stage: PipelineStage): Promise<Deal |
 }
 
 export async function getReports(): Promise<ReportSection[]> {
-  if (await isLiveOrg()) return []; // the report figures are illustrative samples
+  // Live organisations get only the Sales section, computed from their delivered orders. Every other section is an illustrative sample.
+  if (await isLiveOrg()) return [await liveSalesReport()];
   await tick();
   const s = (label: string, seriesTitle: string, vals: number[], metrics: ReportSection["metrics"]): ReportSection => ({
     id: label.toLowerCase().replace(/[^a-z]+/g, "-"),
@@ -491,3 +492,10 @@ export async function createProduct(input: ProductInput): Promise<Product | null
 export async function updateProduct(id: string, input: ProductInput): Promise<Product | null> {
   return (await isLiveOrg()) ? liveUpdateProduct(id, input) : null;
 }
+
+/* ---------- Orders. The demo has no sample orders, so it reads empty and cannot write. ---------- */
+
+export async function getOrders(): Promise<Order[]> { await tick(); return (await isLiveOrg()) ? liveOrders() : []; }
+export async function getOrder(id: string): Promise<Order | null> { await tick(); return (await isLiveOrg()) ? liveOrder(id) : null; }
+export async function createOrder(input: OrderInput): Promise<Order | null> { return (await isLiveOrg()) ? liveCreateOrder(input) : null; }
+export async function updateOrderStatus(id: string, status: OrderStatus): Promise<Order | null> { return (await isLiveOrg()) ? liveUpdateOrderStatus(id, status) : null; }

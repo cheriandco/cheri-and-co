@@ -1,7 +1,9 @@
 /** Pure mapping between database rows and the app's types. No I/O, so it is tested without a database.
  *  The database uses UUIDs, timestamps and enums; the UI types carry display strings such as "Today". */
 import { temperatureFor } from "@/lib/agent-logic";
-import type { Activity, AgentKey, Approval, AuditEntry, Customer, Deal, PipelineStage, Priority, Product, Retailer, Task, Temperature } from "@/types";
+import { ORDER_CHANNELS, ORDER_STATUSES } from "@/types";
+import type { ReportSection } from "@/types";
+import type { Activity, AgentKey, Approval, AuditEntry, Customer, Deal, Order, PipelineStage, Priority, Product, Retailer, Task, Temperature } from "@/types";
 import type { SocialPlatform, SocialPost, SocialStatus } from "@/types/social";
 
 export interface TaskRow { id: string; title: string; source: string; due_at: string | null; priority: string; status: string; assignee_id: string | null; related_ref: string | null }
@@ -148,5 +150,62 @@ export function toSocialPost(r: ContentRow): SocialPost {
     approvalId: r.approval_id ?? undefined, isSample: false, tone: "rose",
     // "pending approval" with no approval behind it is a submission that never completed: nothing is waiting, so it is a draft again
     seedStatus: r.status === "pending_approval" && !r.approval_id ? "draft" : (SOCIAL_STATUS[r.status] ?? "draft"),
+  };
+}
+
+/* ---------- Orders ---------- */
+
+export interface OrderRow { id: string; customer_id: string | null; retailer_id: string | null; channel: string; status: string; total: number | string; line_items: unknown; ordered_at: string }
+
+/** The table's check constraints keep channel and status inside these lists; an unexpected value falls back rather than crashing a page. */
+export function toOrder(r: OrderRow): Order {
+  const items = Array.isArray(r.line_items) ? r.line_items.filter((i): i is Record<string, unknown> => !!i && typeof i === "object" && !Array.isArray(i)) : [];
+  return {
+    id: r.id, customerId: r.customer_id, retailerId: r.retailer_id, total: Number(r.total), lineItems: items, orderedAt: r.ordered_at,
+    channel: (ORDER_CHANNELS as readonly string[]).includes(r.channel) ? (r.channel as Order["channel"]) : "other",
+    status: (ORDER_STATUSES as readonly string[]).includes(r.status) ? (r.status as Order["status"]) : "new",
+  };
+}
+
+/* ---------- Purchases and sales (the business rules agreed for orders) ---------- */
+
+/** A customer's purchases are all of their orders except these. Statuses are the table's own: new, paid, shipped, delivered, cancelled, returned. */
+export const NON_PURCHASE_STATUSES = ["cancelled", "returned"] as const;
+
+/** Revenue counts delivered orders only. New, paid, shipped, cancelled and returned orders are excluded. */
+export const REVENUE_STATUS = "delivered";
+
+const WEEK_MS = 7 * 86_400_000;
+const rupees = (cents: number) => `₹${Math.round(cents / 100).toLocaleString("en-IN")}`;
+
+/** The Sales report for a live organisation, from delivered orders only. `rows` must already be delivered orders.
+ *  Six rolling 7-day weeks ending now (Wk 6 is the latest), compared with the six weeks before. The table stores no delivery
+ *  date, so an order is dated by `ordered_at`. Orders dated in the future are ignored. */
+export function salesReport(rows: { total: number | string; ordered_at: string }[], now = new Date()): ReportSection {
+  const weekCents = Array<number>(12).fill(0); // 0 = newest week, 11 = oldest of the previous period
+  const weekCount = Array<number>(12).fill(0);
+  for (const r of rows) {
+    const age = now.getTime() - new Date(r.ordered_at).getTime();
+    if (!(age >= 0)) continue;
+    const i = Math.floor(age / WEEK_MS);
+    if (i > 11) continue;
+    weekCents[i] += Math.round(Number(r.total) * 100);
+    weekCount[i] += 1;
+  }
+  const sum = (a: number[], from: number, to: number) => a.slice(from, to).reduce((x, y) => x + y, 0);
+  const [rev, prevRev] = [sum(weekCents, 0, 6), sum(weekCents, 6, 12)];
+  const [count, prevCount] = [sum(weekCount, 0, 6), sum(weekCount, 6, 12)];
+  const pct = (cur: number, prev: number) => (prev > 0 ? Math.round(((cur - prev) / prev) * 1000) / 10 : null);
+  const aov = count ? Math.round(rev / count) : null;
+  const prevAov = prevCount ? Math.round(prevRev / prevCount) : null;
+  return {
+    id: "sales", label: "Sales", seriesTitle: "Delivered revenue by week (₹ thousand)",
+    note: "Only delivered orders count. New, paid, shipped, cancelled and returned orders are left out. Orders are dated by when they were placed, because no delivery date is stored. Compared with the six weeks before.",
+    metrics: [
+      { label: "Revenue (delivered)", value: rupees(rev), change: pct(rev, prevRev) },
+      { label: "Delivered orders", value: count.toLocaleString("en-IN"), change: pct(count, prevCount) },
+      { label: "Average order value", value: aov === null ? "—" : rupees(aov), change: aov !== null && prevAov !== null ? pct(aov, prevAov) : null },
+    ],
+    series: Array.from({ length: 6 }, (_, k) => ({ label: `Wk ${k + 1}`, value: Math.round(weekCents[5 - k] / 100) / 1000 })),
   };
 }

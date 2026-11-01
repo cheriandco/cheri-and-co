@@ -68,7 +68,14 @@ Optionally add a second organisation `('Cheri & Co. (sample demo)', true)` and a
   Gaps: no engagement/metrics columns (Performance is "not available"); no asset storage; no brand-rule table; "Simulate publish" is
   demo-only (the app never posts); the Content pack generator uses the sample catalogue so it is hidden for live orgs; posts on
   Pinterest, Email and Amazon A+ are allowed by the table but have no screen; no delete UI; a product price or stock left blank stays null.
-- Not connected yet: orders and the agents' own inputs (B2C conversations, Amazon data, B2B discovery).
+- Slice 4: Orders (`orders` table), through the API only: `GET /api/orders`, `GET /api/orders/:id`, `POST /api/orders`,
+  `PATCH /api/orders/:id` (status only); writes need `orders:write` (owner/admin/approver/staff). There is no Orders screen and
+  no sample orders. Business rules (agreed): a customer's *purchases* are their orders except `cancelled` and `returned`; *revenue*
+  counts `delivered` orders only (statuses in the table: new, paid, shipped, delivered, cancelled, returned). Reports shows a live
+  Sales section from delivered orders (revenue, order count, average order value, six weekly bars, compared with the six weeks
+  before); the other Reports sections stay sample-only and are not shown to live organisations. Orders are dated by `ordered_at`
+  because the table stores no delivery date. `line_items` is free-form JSON (the table defines no shape). No delete.
+- Not connected yet: the agents' own inputs (B2C conversations, Amazon data, B2B discovery).
   For a live organisation these show "Not connected yet" or empty, never sample data.
 
 ## Known limitations

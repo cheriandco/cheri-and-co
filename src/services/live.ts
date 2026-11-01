@@ -7,12 +7,13 @@ import { getAuthUser } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { findProhibitedClaims } from "@/lib/content-agent/claims";
 import { renderPostForApproval, toView } from "@/lib/social/posts";
-import type { CustomerInput, ProductInput, RetailerInput } from "@/lib/validate";
-import type { Activity, AgentKey, Approval, ApprovalStatus, AuditEntry, Customer, Deal, PipelineStage, Product, Retailer, Task } from "@/types";
+import type { CustomerInput, OrderInput, ProductInput, RetailerInput } from "@/lib/validate";
+import type { Activity, AgentKey, Approval, ApprovalStatus, AuditEntry, Customer, Deal, Order, OrderStatus, PipelineStage, Product, Retailer, Task } from "@/types";
+import type { ReportSection } from "@/types";
 import type { SocialPost, SocialPostInput, SocialPostView } from "@/types/social";
 import {
-  SOCIAL_DB_PLATFORMS, parseDue, toActivity, toApproval, toAudit, toCustomer, toDeal, toProduct, toRetailer, toSocialPost, toTask,
-  type ActivityRow, type ApprovalRow, type AuditRow, type ContentRow, type CustomerRow, type LeadRow, type ProductRow, type RetailerRow, type TaskRow,
+  NON_PURCHASE_STATUSES, REVENUE_STATUS, SOCIAL_DB_PLATFORMS, salesReport, parseDue, toActivity, toApproval, toAudit, toCustomer, toDeal, toOrder, toProduct, toRetailer, toSocialPost, toTask,
+  type ActivityRow, type ApprovalRow, type AuditRow, type ContentRow, type CustomerRow, type LeadRow, type OrderRow, type ProductRow, type RetailerRow, type TaskRow,
 } from "./live-map";
 import type { Store } from "./store";
 
@@ -159,9 +160,10 @@ const RETAILER_COLS = "id, business, location, category, contact, email, phone, 
 const LEAD_COLS = "id, retailer_id, stage, score, temperature, owner_id, last_activity_at";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** A customer's purchases are the number of their orders. */
+/** A customer's purchases are their orders other than cancelled and returned ones (see NON_PURCHASE_STATUSES). */
 async function purchaseCounts(supabase: Awaited<ReturnType<typeof ctx>>["supabase"], orgId: string): Promise<Map<string, number>> {
-  const { data } = await supabase.from("orders").select("customer_id").eq("org_id", orgId).not("customer_id", "is", null).limit(5000);
+  const { data } = await supabase.from("orders").select("customer_id").eq("org_id", orgId).not("customer_id", "is", null)
+    .not("status", "in", `(${NON_PURCHASE_STATUSES.join(",")})`).limit(5000);
   const out = new Map<string, number>();
   for (const o of (data ?? []) as { customer_id: string }[]) out.set(o.customer_id, (out.get(o.customer_id) ?? 0) + 1);
   return out;
@@ -400,4 +402,65 @@ async function undoSubmit(supabase: Awaited<ReturnType<typeof ctx>>["supabase"],
   try {
     await supabase.rpc("decide_approval", { p_id: approvalId, p_action: "reject", p_note: "Not linked to a post: the submission failed. Please resubmit.", p_title: null, p_preview: null });
   } catch { /* the caller may not be allowed to decide */ }
+}
+
+/* ---------- Orders ---------- */
+
+const ORDER_COLS = "id, customer_id, retailer_id, channel, status, total, line_items, ordered_at";
+const isForeignKey = (error: { code?: string; message: string }) => error.code === "23503" || /foreign key/i.test(error.message);
+
+export async function liveOrders(): Promise<Order[]> {
+  const { supabase, orgId } = await ctx();
+  const { data, error } = await supabase.from("orders").select(ORDER_COLS).eq("org_id", orgId).order("ordered_at", { ascending: false }).limit(500);
+  if (error) fail(error);
+  return ((data ?? []) as OrderRow[]).map(toOrder);
+}
+
+export async function liveOrder(id: string): Promise<Order | null> {
+  if (!UUID.test(id)) return null;
+  const { supabase, orgId } = await ctx();
+  const { data, error } = await supabase.from("orders").select(ORDER_COLS).eq("org_id", orgId).eq("id", id).maybeSingle();
+  if (error) fail(error);
+  return data ? toOrder(data as OrderRow) : null;
+}
+
+/** A customer or retailer from another organisation is refused by the database's composite foreign key (org_id, id). */
+export async function liveCreateOrder(input: OrderInput): Promise<Order> {
+  const { supabase, orgId } = await ctx();
+  const row = {
+    org_id: orgId, customer_id: input.customerId, retailer_id: input.retailerId, channel: input.channel, status: input.status,
+    total: input.total, line_items: input.lineItems, ...(input.orderedAt ? { ordered_at: input.orderedAt } : {}),
+  };
+  const { data, error } = await supabase.from("orders").insert(row).select(ORDER_COLS).single();
+  if (error) {
+    if (isForeignKey(error)) throw new ConflictError("Unknown customer or retailer");
+    fail(error);
+  }
+  await liveLog({ action: `Recorded a ${input.channel} order` });
+  return toOrder(data as OrderRow);
+}
+
+export async function liveUpdateOrderStatus(id: string, status: OrderStatus): Promise<Order | null> {
+  if (!UUID.test(id)) return null;
+  const { supabase, orgId } = await ctx();
+  const { data, error } = await supabase.from("orders").update({ status }).eq("org_id", orgId).eq("id", id).select(ORDER_COLS);
+  if (error) fail(error);
+  const row = ((data ?? []) as OrderRow[])[0];
+  if (!row) return null;
+  await liveLog({ action: `Marked an order ${status}` });
+  return toOrder(row);
+}
+
+/** The Sales report: delivered orders only, last twelve weeks (six shown, six for comparison). If the row limit were hit the
+ *  figures would be wrong, so that is an error instead of a quietly short total. */
+export async function liveSalesReport(now = new Date()): Promise<ReportSection> {
+  const { supabase, orgId } = await ctx();
+  const since = new Date(now.getTime() - 12 * 7 * 86_400_000).toISOString();
+  const LIMIT = 10_000;
+  const { data, error } = await supabase.from("orders").select("total, ordered_at").eq("org_id", orgId).eq("status", REVENUE_STATUS)
+    .gte("ordered_at", since).limit(LIMIT);
+  if (error) fail(error);
+  const rows = (data ?? []) as { total: number | string; ordered_at: string }[];
+  if (rows.length >= LIMIT) throw new LiveError("Too many orders to total in one report");
+  return salesReport(rows, now);
 }

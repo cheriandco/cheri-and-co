@@ -28,7 +28,10 @@ vi.mock("@/lib/supabase/server", () => ({
         insert: (payload: Row) => { call.op = "insert"; call.payload = payload; return q; },
         update: (payload: Row) => { call.op = "update"; call.payload = payload; return q; },
         eq: (k: string, v: unknown) => { call.eq[k] = v; return q; },
-        in: () => q, not: () => q, order: () => q, limit: () => q,
+        // .not() and .gte() are recorded as "not:col" / "gte:col" and applied below, so the tests can see the filters
+        not: (k: string, op: string, v: unknown) => { call.eq[`not:${k}`] = `${op} ${String(v)}`; return q; },
+        gte: (k: string, v: unknown) => { call.eq[`gte:${k}`] = v; return q; },
+        in: () => q, order: () => q, limit: () => q,
         single: () => { single = true; return q; },
         maybeSingle: () => { single = true; return q; },
         then: (resolve: (v: { data: unknown; error: unknown }) => void) => {
@@ -38,7 +41,12 @@ vi.mock("@/lib/supabase/server", () => ({
           if (fault) return resolve({ data: null, error: fault });
           const all = h.tables[table] ?? [];
           const rows = call.op === "insert" ? [{ id: "new-1", source: "Manual", status: "open", assignee_id: null, ...call.payload }]
-            : all.filter((r) => Object.entries(call.eq).every(([k, v]) => r[k] === v)).map((r) => (call.op === "update" ? { ...r, ...call.payload } : r));
+            : all.filter((r) => Object.entries(call.eq).every(([k, v]) => {
+              if (k.startsWith("gte:")) return String(r[k.slice(4)]) >= String(v);
+              if (!k.startsWith("not:")) return r[k] === v;
+              const col = k.slice(4), [op, arg] = String(v).split(/ (.*)/s);
+              return op === "is" ? r[col] !== null && r[col] !== undefined : !arg.slice(1, -1).split(",").includes(String(r[col]));
+            })).map((r) => (call.op === "update" ? { ...r, ...call.payload } : r));
           resolve({ data: single ? (rows[0] ?? null) : rows, error: null });
         },
       };
@@ -103,7 +111,7 @@ describe("sample data never reaches a live organisation", () => {
     expect(await getRetailers()).toEqual([]); // empty because this organisation has none, never the sample retailers
     expect(await getNotifications()).toEqual([]);
     expect(await getSearchIndex()).toEqual([]);
-    expect(await getReports()).toEqual([]);
+    expect((await getReports()).map((r) => r.id)).toEqual(["sales"]); // only Sales, computed from this organisation's delivered orders; no sample sections
     expect((await getAmazon()).rows).toEqual([]);
   });
   it("the dashboard and the orchestrator show only live counts and 'not connected' for the rest", async () => {
@@ -599,5 +607,168 @@ describe("slice 3: a submission that cannot be completed", () => {
     h.calls.length = 0;
     expect((await postAction(POST1, "submit")).status).toBe(403);
     expect(h.calls.some((c) => c.table === "approvals" && c.op === "insert")).toBe(false);
+  });
+});
+
+/* ---------- Slice 4: orders (fake client: proves app logic, not the real database) ---------- */
+import { createOrder, getOrder, getOrders, updateOrderStatus } from "@/services";
+import { parseOrderInput } from "@/lib/validate";
+import { salesReport, toOrder } from "@/services/live-map";
+import { GET as getResource } from "@/app/api/[resource]/route";
+
+const O1 = "eeeeeeee-0000-4000-8000-000000000001";
+const O_OTHER = "eeeeeeee-0000-4000-8000-000000000002";
+const orderRow = (over: Row) => ({
+  id: O1, org_id: ORG, customer_id: C1, retailer_id: null, channel: "instagram", status: "paid", total: "2499.50",
+  line_items: [{ name: "Mini hoop", qty: 1 }], ordered_at: stamp, ...over,
+});
+const postOrder = (body: unknown) => postResource(jreq("POST", "https://app.test/api/orders", body), { params: Promise.resolve({ resource: "orders" }) });
+const patchOrder = (id: string, body: unknown) => patchResource(jreq("PATCH", `https://app.test/api/orders/${id}`, body), { params: Promise.resolve({ resource: "orders", id }) });
+
+describe("slice 4: live orders", () => {
+  beforeEach(() => { seedPipeline(); h.tables.orders = [orderRow({}), orderRow({ id: O_OTHER, org_id: "other-org", total: 1 })]; });
+
+  it("lists only this organisation's orders, scoped by the verified session's organisation", async () => {
+    h.calls.length = 0;
+    const list = await getOrders();
+    expect(list.map((o) => o.id)).toEqual([O1]);
+    expect(list[0]).toMatchObject({ customerId: C1, retailerId: null, channel: "instagram", status: "paid", total: 2499.5, lineItems: [{ name: "Mini hoop", qty: 1 }] });
+    expect(h.calls.filter((c) => c.table === "orders").every((c) => c.eq.org_id === ORG)).toBe(true);
+  });
+  it("reads one order inside the organisation only", async () => {
+    expect((await getOrder(O1))?.id).toBe(O1);
+    expect(await getOrder(O_OTHER)).toBeNull();
+    expect(await getOrder("not-a-uuid")).toBeNull();
+  });
+  it("falls back safely on unexpected stored values", () => {
+    expect(toOrder(orderRow({ channel: "tiktok", status: "lost", line_items: "oops", total: 5 }) as never)).toMatchObject({ channel: "other", status: "new", lineItems: [], total: 5 });
+    expect(toOrder(orderRow({ line_items: [1, null, ["x"], { ok: true }] }) as never).lineItems).toEqual([{ ok: true }]);
+  });
+  it("creates an order in the session's organisation with only the table's columns", async () => {
+    h.calls.length = 0;
+    const res = await postOrder({ channel: "amazon", total: "1999", customerId: C1, lineItems: [{ sku: "CC-1" }], org_id: "attacker-org", revenue: 5, id: "forced" });
+    expect(res.status).toBe(201);
+    const ins = h.calls.find((c) => c.table === "orders" && c.op === "insert")!;
+    expect(ins.payload).toEqual({ org_id: ORG, customer_id: C1, retailer_id: null, channel: "amazon", status: "new", total: 1999, line_items: [{ sku: "CC-1" }] });
+  });
+  it("defaults to a new, zero-value order and rejects invalid input with 400 and no write", async () => {
+    expect((await postOrder({ channel: "b2b" })).status).toBe(201);
+    h.calls.length = 0;
+    for (const bad of [{}, { channel: "tiktok" }, { channel: "b2b", status: "lost" }, { channel: "b2b", total: -1 }, { channel: "b2b", total: "abc" }, { channel: "b2b", total: 1e12 },
+      { channel: "b2b", customerId: "nope" }, { channel: "b2b", lineItems: "x" }, { channel: "b2b", lineItems: [1] }, { channel: "b2b", lineItems: Array(101).fill({}) },
+      { channel: "b2b", orderedAt: "yesterday" }]) {
+      expect((await postOrder(bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(h.calls.filter((c) => c.op === "insert")).toEqual([]);
+  });
+  it("a customer or retailer from another organisation is refused by the database (409), a refused write is 403", async () => {
+    h.insertError = { code: "23503", message: "insert or update violates foreign key constraint" };
+    expect((await postOrder({ channel: "b2b", customerId: C_OTHER })).status).toBe(409);
+    h.insertError = { code: "42501", message: "new row violates row-level security policy" };
+    expect((await postOrder({ channel: "b2b" })).status).toBe(403);
+  });
+  it("updates only the status, only inside the organisation", async () => {
+    h.calls.length = 0;
+    const res = await patchOrder(O1, { status: "shipped", total: 1, customerId: null });
+    expect(res.status).toBe(200);
+    const upd = h.calls.find((c) => c.table === "orders" && c.op === "update")!;
+    expect(upd.payload).toEqual({ status: "shipped" });
+    expect(upd.eq).toMatchObject({ org_id: ORG, id: O1 });
+    expect((await patchOrder(O_OTHER, { status: "shipped" })).status).toBe(404);
+    expect((await patchOrder(O1, { status: "lost" })).status).toBe(400);
+    expect((await patchOrder(O1, {})).status).toBe(400);
+  });
+  it("owner, admin, approver and staff may write orders; a viewer may only read", async () => {
+    for (const role of ["owner", "admin", "approver", "staff"]) { setRole(role); expect((await postOrder({ channel: "b2b" })).status, role).toBe(201); }
+    setRole("viewer");
+    expect((await postOrder({ channel: "b2b" })).status).toBe(403);
+    expect((await patchOrder(O1, { status: "paid" })).status).toBe(403);
+    const read = await getResource(new Request("https://app.test/api/orders", { headers: json }), { params: Promise.resolve({ resource: "orders" }) });
+    expect(read.status).toBe(200);
+    expect(((await read.json()) as unknown[]).length).toBe(1);
+  });
+  it("a demo organisation has no sample orders, never sees live rows and cannot write", async () => {
+    setMembership(true);
+    expect(await getOrders()).toEqual([]);
+    expect(await getOrder(O1)).toBeNull();
+    expect(await createOrder({ channel: "b2b" } as never)).toBeNull();
+    expect(await updateOrderStatus(O1, "paid")).toBeNull();
+    expect((await postOrder({ channel: "b2b" })).status).toBe(404);
+    expect((await patchOrder(O1, { status: "paid" })).status).toBe(404);
+  });
+  it("customer purchase counts still come from the organisation's own orders", async () => {
+    expect((await getCustomers()).find((c) => c.id === C1)?.purchases).toBe(1);
+  });
+  it("input parser keeps the table's limits and rounds to two decimals", () => {
+    expect(parseOrderInput({ channel: "other", total: 10.005 })).toMatchObject({ status: "new", total: 10.01, lineItems: [], customerId: null });
+    expect(parseOrderInput({ channel: "other", orderedAt: "2026-11-02T10:00:00Z" })?.orderedAt).toBe("2026-11-02T10:00:00.000Z");
+    expect(parseOrderInput(null)).toBeNull();
+  });
+});
+
+describe("slice 4: revenue and purchase rules", () => {
+  const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000 - 3_600_000).toISOString();
+  beforeEach(() => {
+    seedPipeline();
+    h.tables.orders = [
+      orderRow({ id: "o-new", status: "new", total: 100 }), orderRow({ id: "o-paid", status: "paid", total: 200 }), orderRow({ id: "o-shipped", status: "shipped", total: 400 }),
+      orderRow({ id: "o-del-a", status: "delivered", total: "1000.50", ordered_at: daysAgo(3) }), orderRow({ id: "o-del-b", status: "delivered", total: 500, ordered_at: daysAgo(40) }),
+      orderRow({ id: "o-del-prev", status: "delivered", total: 750, ordered_at: daysAgo(50) }), orderRow({ id: "o-del-old", status: "delivered", total: 9999, ordered_at: daysAgo(200) }),
+      orderRow({ id: "o-cancelled", status: "cancelled", total: 800 }), orderRow({ id: "o-returned", status: "returned", total: 900 }),
+      orderRow({ id: "o-other-org", org_id: "other-org", status: "delivered", total: 123456, ordered_at: daysAgo(2) }),
+    ];
+  });
+
+  it("revenue counts delivered orders only, from this organisation, for the last twelve weeks", async () => {
+    h.calls.length = 0;
+    const [sales] = await getReports();
+    const q = h.calls.find((c) => c.table === "orders")!;
+    expect(q.eq).toMatchObject({ org_id: ORG, status: "delivered" });
+    expect(sales.metrics.map((m) => [m.label, m.value])).toEqual([["Revenue (delivered)", "₹1,501"], ["Delivered orders", "2"], ["Average order value", "₹750"]]);
+    expect(sales.series).toHaveLength(6);
+    expect(sales.series.reduce((n, p) => n + p.value, 0)).toBeCloseTo(1.5005, 3); // ₹ thousand; excludes the other organisation and the 200-day-old order
+    expect(sales.note).toMatch(/Only delivered orders count/);
+  });
+  it("is empty, not invented, when there are no delivered orders", async () => {
+    h.tables.orders = [orderRow({ status: "paid" })];
+    const [sales] = await getReports();
+    expect(sales.metrics.map((m) => m.value)).toEqual(["₹0", "0", "—"]);
+    expect(sales.metrics.every((m) => m.change === null)).toBe(true);
+    expect(sales.series.every((p) => p.value === 0)).toBe(true);
+  });
+  it("salesReport buckets by rolling week, compares with the six weeks before and ignores future orders", () => {
+    const now = new Date("2026-11-02T12:00:00Z");
+    const at = (d: number) => new Date(now.getTime() - d * 86_400_000).toISOString();
+    const r = salesReport([
+      { total: 100, ordered_at: at(1) }, { total: 300, ordered_at: at(40) }, // current period: Wk 6 and Wk 1
+      { total: 200, ordered_at: at(50) }, // previous period
+      { total: 5000, ordered_at: at(-3) }, // future: ignored
+      { total: 5000, ordered_at: at(100) }, // too old: ignored
+    ], now);
+    expect(r.series.map((p) => p.value)).toEqual([0.3, 0, 0, 0, 0, 0.1]);
+    expect(r.metrics[0]).toEqual({ label: "Revenue (delivered)", value: "₹400", change: 100 });
+    expect(r.metrics[1]).toMatchObject({ value: "2", change: 100 });
+  });
+  it("only the Sales section exists for a live organisation; a demo organisation keeps all seven sample sections", async () => {
+    expect((await getReports()).map((r) => r.id)).toEqual(["sales"]);
+    setMembership(true);
+    const demo = await getReports();
+    expect(demo).toHaveLength(7);
+    expect(demo[0].metrics[0].value).toBe("₹12.6L"); // the unchanged sample figure
+  });
+  it("customer purchases exclude cancelled and returned orders and count every other status", async () => {
+    h.calls.length = 0;
+    const list = await getCustomers();
+    expect(list.find((c) => c.id === C1)?.purchases).toBe(7); // new, paid, shipped and all four delivered ones (age does not matter); not cancelled or returned; not the other organisation's
+    expect(h.calls.find((c) => c.table === "orders")!.eq).toMatchObject({ org_id: ORG, "not:status": "in (cancelled,returned)" });
+  });
+  it("the customer list and the customer page use the same purchase rule", async () => {
+    expect((await getCustomer(C1))?.purchases).toBe((await getCustomers()).find((c) => c.id === C1)?.purchases);
+  });
+  it("any role that can read can see the report; the report never writes", async () => {
+    setRole("viewer");
+    h.calls.length = 0;
+    expect((await getReports()).map((r) => r.id)).toEqual(["sales"]);
+    expect(h.calls.filter((c) => c.op !== "select")).toEqual([]);
   });
 });
