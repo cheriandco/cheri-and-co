@@ -65,6 +65,11 @@ export function StatusBadge({ status, label }: { status: string; label?: string 
   return <span className={`badge ${tone}`}>{label ?? text}</span>;
 }
 
+/** Marks anything an agent "did" in this demo. Same wording on every agent page. */
+export function SimBadge({ children = "SAMPLE · simulated" }: { children?: ReactNode }) {
+  return <span className="badge champagne plain">{children}</span>;
+}
+
 export function Avatar({ name, size }: { name: string; size?: "sm" | "lg" }) {
   const initials = name.replace(/[^\p{L}\s]/gu, "").split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]).join("").toUpperCase();
   return <span className={`avatar ${size ?? ""}`} aria-hidden>{initials}</span>;

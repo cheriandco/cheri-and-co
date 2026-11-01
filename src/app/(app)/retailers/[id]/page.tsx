@@ -2,8 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ExternalLink } from "lucide-react";
-import { getActivities, getRetailer, getTasks } from "@/services";
-import { PageHeader, DashboardCard, SectionHeader, Score, StatusBadge } from "@/components/ui";
+import { getActionLinks, getActivities, getRetailer, getTasks } from "@/services";
+import { followUpFor, qualificationFactors } from "@/lib/agent-logic";
+import { QueueButton } from "@/components/agent-actions";
+import { FactorList } from "@/components/agent-views";
+import { PageHeader, DashboardCard, SectionHeader, Score, SimBadge, StatusBadge } from "@/components/ui";
 import { ActivityTimeline } from "@/components/domain";
 import { STAGE_LABELS } from "@/lib/agents";
 
@@ -13,7 +16,8 @@ export default async function RetailerPage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const r = await getRetailer(id);
   if (!r) notFound();
-  const [tasks, activities] = await Promise.all([getTasks(), getActivities()]);
+  const [tasks, activities, links] = await Promise.all([getTasks(), getActivities(), getActionLinks()]);
+  const follow = followUpFor(r);
   const myTasks = tasks.filter((t) => t.href === `/retailers/${id}`);
 
   return (
@@ -40,6 +44,16 @@ export default async function RetailerPage({ params }: { params: Promise<{ id: s
               <dt>Notes</dt><dd>{r.qualification}</dd>
             </dl>
           </DashboardCard>
+          <DashboardCard>
+            <SectionHeader title="Qualification factors" extra={<SimBadge>SAMPLE · rule-based</SimBadge>} />
+            <FactorList factors={qualificationFactors(r)} />
+          </DashboardCard>
+          <DashboardCard tint>
+            <SectionHeader title="Recommended follow-up" extra={<SimBadge />} />
+            <p style={{ margin: "0 0 4px", fontWeight: 500 }}>{follow.title}</p>
+            <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>{follow.reason} Drafting sends nothing: the email waits in Approvals.</p>
+            <QueueButton agent="b2b" refId={r.id} label="Draft follow-up email (demo)" link={links[`b2b:${r.id}`]} />
+          </DashboardCard>
         </div>
         <div className="stack">
           <DashboardCard>
@@ -48,7 +62,7 @@ export default async function RetailerPage({ params }: { params: Promise<{ id: s
           </DashboardCard>
           <DashboardCard>
             <SectionHeader title="Activity timeline" />
-            <ActivityTimeline items={activities} />
+            <ActivityTimeline items={activities.filter((a) => a.ref === id)} />
           </DashboardCard>
         </div>
       </div>

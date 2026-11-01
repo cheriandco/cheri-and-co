@@ -167,6 +167,10 @@ export const activities: Activity[] = [
   { id: "ac-3", at: "Yesterday, 17:30", actor: "Anika", text: "Approved product recommendation message" },
   { id: "ac-4", at: "Yesterday, 11:02", actor: "B2B Lead Agent", text: "Updated lead score after website review" },
   { id: "ac-5", at: "03 Oct, 14:20", actor: "System", text: "Record created from Instagram DM" },
+  { id: "ac-6", at: "Today, 10:31", actor: "B2B Lead Agent", text: "Qualified Mira Boutique (score 86)", agent: "b2b", ref: "r1" },
+  { id: "ac-7", at: "Yesterday, 16:10", actor: "Anika", text: "Intro email to Mira Boutique approved (sample)", agent: "b2b", ref: "r1" },
+  { id: "ac-8", at: "Yesterday, 12:45", actor: "CRM & Sales Operations Agent", text: "Moved The Gilded Aisle to Contacted", agent: "crm", ref: "r2" },
+  { id: "ac-9", at: "Today, 09:50", actor: "CRM & Sales Operations Agent", text: "Logged call notes for Ember & Ivory", agent: "crm", ref: "r6" },
 ];
 
 export const notifications: AppNotification[] = [

@@ -104,6 +104,13 @@ Demo only: every call works on the visitor's private in-memory copy and nothing 
 - `POST /api/social/assist`: template-based ideas, captions and creative briefs, labelled "DEMO RESPONSE". No AI model is called.
 Status follows the linked approval: pending, approved, rejected. Decisions are made through the existing `/api/approvals/:id/:action`.
 
+## 4b. Cross-agent demo endpoints
+Demo only. Every call works on the visitor's private in-memory copy. Nothing is sent, posted or changed anywhere.
+- `POST /api/agent-actions {agent: b2c|b2b|amazon, ref}`: queues the agent's suggestion in Approvals (201; 409 if already pending; 404 unknown record). The text is rebuilt on the server from sample records.
+- `GET /api/b2b/discover`: fixed SAMPLE retailer candidates with rule-based fit scores. `POST {id}` adds one to the visitor's leads and pipeline.
+- `GET /api/crm/suggestions`: rule-based next actions. `POST {key}` creates a task from one.
+- `GET /api/orchestrator/brief`: cross-agent summary (per-agent headline, pending approvals, recommendations, latest activity). Read-only.
+
 ## 5. Open questions
 1. Authentication method (email/password, magic link, SSO) and who the first users are.
 2. Roles and which actions each may take (e.g. who may approve or reject).

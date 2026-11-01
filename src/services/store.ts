@@ -5,9 +5,9 @@
  *  another visitor. Copies expire after a couple of hours and are capped in number. Replace with Supabase queries
  *  inside the services once the production build is approved. */
 import { cookies } from "next/headers";
-import { approvals, deals, tasks } from "@/mocks/data";
+import { activities, approvals, deals, retailers, tasks } from "@/mocks/data";
 import { socialPosts } from "@/mocks/social-samples";
-import type { Approval, AuditEntry, Deal, Task } from "@/types";
+import type { Activity, Approval, AuditEntry, Deal, Retailer, Task } from "@/types";
 import type { SocialPost } from "@/types/social";
 
 export interface Store {
@@ -16,6 +16,11 @@ export interface Store {
   deals: Deal[];
   audit: AuditEntry[];
   social: SocialPost[];
+  retailers: Retailer[];
+  /** Newest first. Agent and human actions in this visitor's demo session. */
+  activity: Activity[];
+  /** "agent:ref" -> approval id, so a suggestion shows its status instead of a second button. */
+  links: Record<string, string>;
 }
 
 const seed = (): Store => ({
@@ -24,6 +29,9 @@ const seed = (): Store => ({
   deals: structuredClone(deals),
   audit: [],
   social: structuredClone(socialPosts),
+  retailers: structuredClone(retailers),
+  activity: structuredClone(activities),
+  links: {},
 });
 
 const COOKIE = "cheri_demo_visitor";

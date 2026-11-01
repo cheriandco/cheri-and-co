@@ -82,6 +82,14 @@ Create Post (title, topic, platform, caption, hashtags, creative brief, image di
 Submit for approval (demo) → Approvals (Approve or Reject, simulated) → Simulate publish (demo) → Published and Performance (SAMPLE metrics).
 The Content Calendar shows a five-week grid with platform and status. Nothing is posted; every label says so.
 
+## 5b. Agent demo flows (all simulated)
+- B2C: pick an enquiry, read the suggested reply and its rule-based intent, "Send reply to approval (demo)".
+- B2B: "Run discovery (simulated)" over SAMPLE candidates, review "Why this score", "Add to leads (demo)", then "Draft follow-up (demo)" from the recommendations or the retailer profile.
+- Amazon: review competitors, review themes and price position, then "Send to approval (demo)" on a recommendation.
+- Content: see 5a.
+- CRM: Overview tab lists suggested next actions, each with "Create task (demo)"; activity history is shared by all agents.
+- Orchestrator: the dashboard card summarises all five agents, recommends next actions and shows cross-agent activity. It never acts on its own.
+
 ## 6. Dependencies
 Answers to §5; client-owned accounts for each integration; authentication and roles (`docs/API.md` §5);
 a real product catalogue (`docs/DATABASE.md` §4); a staging environment for user-acceptance testing.

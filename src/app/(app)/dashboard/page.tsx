@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
-import { getCurrentUser, getDashboardSummary } from "@/services";
+import { getCurrentUser, getDashboardSummary, getOrchestratorBrief } from "@/services";
+import { OrchestratorCard } from "@/components/agent-views";
 import { PageHeader, SectionHeader, DashboardCard } from "@/components/ui";
 import { KpiCard, AgentStatusCard, ConversationList, RetailerTable, ContentList, AmazonInsightTable } from "@/components/domain";
 import { PipelineFunnel, TrendChart } from "@/components/charts";
@@ -15,7 +16,7 @@ const greeting = () => {
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
   const { range } = await searchParams;
-  const [user, d] = await Promise.all([getCurrentUser(), getDashboardSummary(range)]);
+  const [user, d, brief] = await Promise.all([getCurrentUser(), getDashboardSummary(range), getOrchestratorBrief()]);
 
   return (
     <div className="stack" style={{ gap: 28 }}>
@@ -29,6 +30,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <section className="grid kpis" aria-label="Key metrics">
         {d.kpis.map((k) => <KpiCard key={k.id} kpi={k} />)}
       </section>
+
+      <OrchestratorCard brief={brief} />
 
       <div className="grid two">
         <DashboardCard>

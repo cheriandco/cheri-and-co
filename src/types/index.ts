@@ -250,6 +250,10 @@ export interface Activity {
   at: string;
   actor: string;
   text: string;
+  /** Agent that produced the entry, when it came from one. */
+  agent?: AgentKey;
+  /** Retailer or customer the entry is about (used for profile timelines). */
+  ref?: string;
 }
 
 export interface AppNotification {
