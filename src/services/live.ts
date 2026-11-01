@@ -1,15 +1,16 @@
 /** Live data, read and written through the signed-in user's own Supabase session, so Row Level Security applies to
  *  every call. The organisation always comes from the verified session (`orgId`), never from a request. Used only for
- *  organisations that are not flagged is_demo. This slice covers tasks, approvals, the audit log and agent activity. */
+ *  organisations that are not flagged is_demo. This covers tasks, approvals, the audit log, agent activity, customers, retailers and leads. */
 import { cache } from "react";
 import { AuthError } from "@/lib/auth/access";
 import { getAuthUser } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { findProhibitedClaims } from "@/lib/content-agent/claims";
-import type { Activity, AgentKey, Approval, AuditEntry, Task } from "@/types";
+import type { CustomerInput, RetailerInput } from "@/lib/validate";
+import type { Activity, AgentKey, Approval, AuditEntry, Customer, Deal, PipelineStage, Retailer, Task } from "@/types";
 import {
-  parseDue, toActivity, toApproval, toAudit, toTask,
-  type ActivityRow, type ApprovalRow, type AuditRow, type TaskRow,
+  parseDue, toActivity, toApproval, toAudit, toCustomer, toDeal, toRetailer, toTask,
+  type ActivityRow, type ApprovalRow, type AuditRow, type CustomerRow, type LeadRow, type RetailerRow, type TaskRow,
 } from "./live-map";
 import type { Store } from "./store";
 
@@ -138,6 +139,94 @@ export async function liveLog(entry: { agent?: AgentKey; action: string }): Prom
 /** The parts of the app's Store that live in the database. Everything else is empty on purpose: a live organisation
  *  never sees sample records. Memoised per request so one page render makes four queries at most. */
 export const loadLiveStore = cache(async (): Promise<Store> => {
-  const [tasks, approvals, audit, activity] = await Promise.all([liveTasks(), liveApprovals(), liveAudit(), liveActivity()]);
-  return { tasks, approvals, audit, activity, deals: [], social: [], retailers: [], links: {} };
+  const [tasks, approvals, audit, activity, pipeline] = await Promise.all([liveTasks(), liveApprovals(), liveAudit(), liveActivity(), liveRetailersAndDeals()]);
+  return { tasks, approvals, audit, activity, deals: pipeline.deals, social: [], retailers: pipeline.retailers, links: {} };
 });
+
+/* ---------- Customers, retailers and leads ---------- */
+
+const CUSTOMER_COLS = "id, name, instagram, phone, email, city, interests, created_at";
+const RETAILER_COLS = "id, business, location, category, contact, email, phone, instagram, website, qualification, created_at";
+const LEAD_COLS = "id, retailer_id, stage, score, temperature, owner_id, last_activity_at";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A customer's purchases are the number of their orders. */
+async function purchaseCounts(supabase: Awaited<ReturnType<typeof ctx>>["supabase"], orgId: string): Promise<Map<string, number>> {
+  const { data } = await supabase.from("orders").select("customer_id").eq("org_id", orgId).not("customer_id", "is", null).limit(5000);
+  const out = new Map<string, number>();
+  for (const o of (data ?? []) as { customer_id: string }[]) out.set(o.customer_id, (out.get(o.customer_id) ?? 0) + 1);
+  return out;
+}
+
+export async function liveCustomers(): Promise<Customer[]> {
+  const { supabase, orgId } = await ctx();
+  const { data, error } = await supabase.from("customers").select(CUSTOMER_COLS).eq("org_id", orgId).order("created_at", { ascending: false }).limit(500);
+  if (error) fail(error);
+  const counts = await purchaseCounts(supabase, orgId);
+  return ((data ?? []) as CustomerRow[]).map((r) => toCustomer(r, counts.get(r.id) ?? 0));
+}
+
+export async function liveCustomer(id: string): Promise<Customer | null> {
+  if (!UUID.test(id)) return null; // a malformed id would be a database error, not "not found"
+  const { supabase, orgId } = await ctx();
+  const { data, error } = await supabase.from("customers").select(CUSTOMER_COLS).eq("org_id", orgId).eq("id", id).maybeSingle();
+  if (error) fail(error);
+  if (!data) return null;
+  const counts = await purchaseCounts(supabase, orgId);
+  return toCustomer(data as CustomerRow, counts.get(id) ?? 0);
+}
+
+export async function liveCreateCustomer(input: CustomerInput): Promise<Customer> {
+  const { supabase, orgId } = await ctx();
+  const { data, error } = await supabase.from("customers").insert({ org_id: orgId, ...input }).select(CUSTOMER_COLS).single();
+  if (error) fail(error);
+  await liveLog({ agent: "crm", action: `Added customer: ${input.name}` });
+  return toCustomer(data as CustomerRow, 0);
+}
+
+/** Retailers with their lead. A retailer without a lead row shows as a new, unscored retailer. */
+export async function liveRetailersAndDeals(): Promise<{ retailers: Retailer[]; deals: Deal[] }> {
+  const { supabase, orgId } = await ctx();
+  const [r, l] = await Promise.all([
+    supabase.from("retailers").select(RETAILER_COLS).eq("org_id", orgId).order("created_at", { ascending: false }).limit(500),
+    supabase.from("leads").select(LEAD_COLS).eq("org_id", orgId).order("last_activity_at", { ascending: false }).limit(500),
+  ]);
+  if (r.error) fail(r.error);
+  if (l.error) fail(l.error);
+  const retailers = (r.data ?? []) as RetailerRow[];
+  const leads = (l.data ?? []) as LeadRow[];
+  const byRetailer = new Map<string, LeadRow>(); // leads are newest first, so the first one seen per retailer is the latest
+  for (const lead of leads) if (!byRetailer.has(lead.retailer_id)) byRetailer.set(lead.retailer_id, lead);
+  const rows = new Map(retailers.map((x) => [x.id, x]));
+  const n = await names(supabase, leads.map((x) => x.owner_id));
+  return {
+    retailers: retailers.map((x) => toRetailer(x, byRetailer.get(x.id))),
+    deals: leads.flatMap((x) => { const rt = rows.get(x.retailer_id); return rt ? [toDeal(x, rt, n)] : []; }),
+  };
+}
+
+/** Creates the retailer and its first lead (stage "new"). If the lead insert fails the retailer is kept and shows as new. */
+export async function liveCreateRetailer(input: RetailerInput): Promise<Retailer> {
+  const { supabase, orgId } = await ctx();
+  const { data, error } = await supabase.from("retailers").insert({ org_id: orgId, ...input }).select(RETAILER_COLS).single();
+  if (error) fail(error);
+  const retailer = data as RetailerRow;
+  const lead = await supabase.from("leads").insert({ org_id: orgId, retailer_id: retailer.id, stage: "new" }).select(LEAD_COLS).single();
+  await liveLog({ agent: "b2b", action: `Added retailer: ${input.business}` });
+  return toRetailer(retailer, lead.error ? undefined : (lead.data as LeadRow));
+}
+
+export async function liveMoveDeal(id: string, stage: PipelineStage): Promise<Deal | null> {
+  if (!UUID.test(id)) return null;
+  const { supabase, orgId } = await ctx();
+  const { data, error } = await supabase.from("leads").update({ stage, last_activity_at: new Date().toISOString() })
+    .eq("org_id", orgId).eq("id", id).select(LEAD_COLS);
+  if (error) fail(error);
+  const lead = ((data ?? []) as LeadRow[])[0];
+  if (!lead) return null;
+  const { data: rt } = await supabase.from("retailers").select(RETAILER_COLS).eq("org_id", orgId).eq("id", lead.retailer_id).maybeSingle();
+  if (!rt) return null;
+  const n = await names(supabase, [lead.owner_id]);
+  await liveLog({ agent: "crm", action: `Moved ${(rt as RetailerRow).business} to ${stage}` });
+  return toDeal(lead, rt as RetailerRow, n);
+}

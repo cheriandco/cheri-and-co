@@ -1,6 +1,7 @@
 /** Pure mapping between database rows and the app's types. No I/O, so it is tested without a database.
  *  The database uses UUIDs, timestamps and enums; the UI types carry display strings such as "Today". */
-import type { Activity, AgentKey, Approval, AuditEntry, Priority, Task } from "@/types";
+import { temperatureFor } from "@/lib/agent-logic";
+import type { Activity, AgentKey, Approval, AuditEntry, Customer, Deal, PipelineStage, Priority, Retailer, Task, Temperature } from "@/types";
 
 export interface TaskRow { id: string; title: string; source: string; due_at: string | null; priority: string; status: string; assignee_id: string | null; related_ref: string | null }
 export interface ApprovalRow { id: string; title: string; type: string; generated_by: string; status: string; preview: string; meta: unknown; created_at: string }
@@ -67,4 +68,49 @@ export function toAudit(r: AuditRow, names: Map<string, string>): AuditEntry {
 export function toActivity(r: ActivityRow, names: Map<string, string>, now = new Date()): Activity {
   const agent = isAgent(r.agent) ? r.agent : undefined;
   return { id: String(r.id), at: ago(r.created_at, now), actor: (r.actor_id && names.get(r.actor_id)) || (agent ? "Agent" : "A team member"), text: r.action, agent, ref: r.ref_id ?? undefined };
+}
+
+/* ---------- Customers, retailers and leads ---------- */
+
+export interface CustomerRow { id: string; name: string; instagram: string | null; phone: string | null; email: string | null; city: string | null; interests: string[] | null; created_at: string }
+export interface RetailerRow { id: string; business: string; location: string | null; category: string | null; contact: string | null; email: string | null; phone: string | null; instagram: string | null; website: string | null; qualification: string | null; created_at: string }
+export interface LeadRow { id: string; retailer_id: string; stage: string; score: number | null; temperature: string | null; owner_id: string | null; last_activity_at: string }
+
+const NOT_RECORDED = "Not recorded";
+const STAGE_SET: readonly string[] = ["new", "qualified", "contacted", "interested", "negotiation", "won", "lost"];
+export const asStage = (v: string | undefined): PipelineStage => (v && STAGE_SET.includes(v) ? (v as PipelineStage) : "new");
+
+/** `purchases` is the number of this customer's orders. The database has no Amazon/Flipkart click columns, so those are 0
+ *  and the customer page hides them for live organisations. */
+export function toCustomer(r: CustomerRow, purchases: number): Customer {
+  return {
+    id: r.id, name: r.name, instagram: r.instagram ?? "", phone: r.phone ?? "", email: r.email ?? "", city: r.city ?? "",
+    firstSeen: new Date(r.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }),
+    interests: r.interests ?? [], amazonClicks: 0, flipkartClicks: 0, purchases,
+  };
+}
+
+/** The database has no maps column, so the link is a Google Maps search built from the name and place: nothing is stored. */
+export const mapsSearchUrl = (business: string, location: string | null): string =>
+  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([business, location].filter(Boolean).join(" "))}`;
+
+/** A retailer plus its lead (score, temperature, stage live on the lead row). With no lead it is a new, unscored retailer. */
+export function toRetailer(r: RetailerRow, lead?: LeadRow, now = new Date()): Retailer {
+  const score = lead?.score ?? 0;
+  const stage = asStage(lead?.stage);
+  const temperature: Temperature = lead?.temperature === "HOT" || lead?.temperature === "WARM" || lead?.temperature === "COLD" ? lead.temperature : temperatureFor(score);
+  return {
+    id: r.id, business: r.business, location: r.location ?? "", category: r.category ?? "", score, temperature,
+    status: stage.charAt(0).toUpperCase() + stage.slice(1), lastActivity: ago(lead?.last_activity_at ?? r.created_at, now),
+    contact: r.contact ?? NOT_RECORDED, email: r.email ?? NOT_RECORDED, phone: r.phone ?? NOT_RECORDED,
+    instagram: r.instagram ?? NOT_RECORDED, website: r.website ?? NOT_RECORDED, mapsUrl: mapsSearchUrl(r.business, r.location),
+    qualification: r.qualification ?? "", stage,
+  };
+}
+
+export function toDeal(l: LeadRow, r: RetailerRow, names: Map<string, string>, now = new Date()): Deal {
+  return {
+    id: l.id, retailerId: l.retailer_id, business: r.business, location: r.location ?? "", stage: asStage(l.stage),
+    score: l.score ?? 0, owner: (l.owner_id && names.get(l.owner_id)) || "Unassigned", updated: ago(l.last_activity_at, now),
+  };
 }

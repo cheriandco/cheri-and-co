@@ -1,5 +1,3 @@
-import { isLiveOrg } from "@/lib/auth/access";
-import { NotConnected } from "@/components/not-connected";
 import type { Metadata } from "next";
 import { getCustomers } from "@/services";
 import { PageHeader, DashboardCard } from "@/components/ui";
@@ -8,7 +6,6 @@ import { CustomerTable } from "@/components/domain";
 export const metadata: Metadata = { title: "Customers" };
 
 export default async function CustomersPage() {
-  if (await isLiveOrg()) return <NotConnected title="Customers" />;
   const rows = await getCustomers();
   return (
     <div className="stack">

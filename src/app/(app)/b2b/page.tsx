@@ -1,6 +1,5 @@
-import { isLiveOrg } from "@/lib/auth/access";
-import { NotConnected } from "@/components/not-connected";
 import type { Metadata } from "next";
+import { isLiveOrg } from "@/lib/auth/access";
 import { getActionLinks, getActivities, getDashboardSummary, getDiscovery, getRetailers } from "@/services";
 import { followUpFor } from "@/lib/agent-logic";
 import { DiscoveryPanel, QueueButton } from "@/components/agent-actions";
@@ -13,7 +12,7 @@ export const metadata: Metadata = { title: "B2B Leads" };
 const OPTIONS = [{ id: "all", label: "All" }, { id: "HOT", label: "Hot" }, { id: "WARM", label: "Warm" }, { id: "COLD", label: "Cold" }];
 
 export default async function B2BPage({ searchParams }: { searchParams: Promise<{ temp?: string }> }) {
-  if (await isLiveOrg()) return <NotConnected title="B2B Leads" />;
+  const live = await isLiveOrg();
   const { temp = "all" } = await searchParams;
   const [all, summary, discovery, links, activity] = await Promise.all([getRetailers(), getDashboardSummary(), getDiscovery(), getActionLinks(), getActivities()]);
   const focus = all.filter((r) => r.stage !== "won" && r.stage !== "lost").sort((a, b) => b.score - a.score).slice(0, 4);
@@ -22,7 +21,7 @@ export default async function B2BPage({ searchParams }: { searchParams: Promise<
   return (
     <div className="stack">
       <PageHeader eyebrow="B2B Lead Agent" title="B2B Leads" subtitle="Retailers discovered and qualified by your lead agent, ranked by fit." />
-      <DiscoveryPanel note={discovery.note} candidates={discovery.candidates} />
+      {!live && <DiscoveryPanel note={discovery.note} candidates={discovery.candidates} />}
       <div className="grid two">
         <DashboardCard flush>
           <div style={{ padding: "22px 22px 0" }}>
@@ -37,6 +36,7 @@ export default async function B2BPage({ searchParams }: { searchParams: Promise<
         </DashboardCard>
       </div>
       <div className="grid even">
+        {!live && (
         <DashboardCard>
           <SectionHeader title="Follow-up recommendations" extra={<SimBadge>SAMPLE · rule-based</SimBadge>} />
           <div className="list">
@@ -54,6 +54,7 @@ export default async function B2BPage({ searchParams }: { searchParams: Promise<
             })}
           </div>
         </DashboardCard>
+        )}
         <DashboardCard>
           <SectionHeader title="Sales activity" href="/crm?tab=activities" />
           <ActivityTimeline items={activity.filter((a) => a.agent === "b2b" || a.agent === "crm" || a.actor.startsWith("B2B")).slice(0, 6)} />

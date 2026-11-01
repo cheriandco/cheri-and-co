@@ -10,9 +10,12 @@ import { findProhibitedClaims } from "@/lib/content-agent/claims";
 import { runContentAgent, type ContentRunInput } from "@/lib/content-agent";
 import { DISCOVERY_NOTE, discoveryCandidates, type DiscoveryCandidate } from "@/mocks/agent-samples";
 import { amazonActionFor, buildSuggestions, followUpEmail, scoreCandidate, suggestedReplyFor, temperatureFor, type Suggestion } from "@/lib/agent-logic";
-import { AGENT_NAMES } from "@/lib/agents";
+import { AGENT_NAMES, STAGE_LABELS } from "@/lib/agents";
 import { renderDraft } from "@/lib/content-agent/render";
-import { liveCreateTask, liveDecideApproval, liveUpdateTask } from "./live";
+import type { CustomerInput, RetailerInput } from "@/lib/validate";
+import {
+  liveCreateCustomer, liveCreateRetailer, liveCreateTask, liveCustomer, liveCustomers, liveDecideApproval, liveMoveDeal, liveUpdateTask,
+} from "./live";
 import { readStore, writableStore, type Store } from "./store";
 import type {
   Activity, AgentKey, Approval, AuditEntry, Conversation, Customer, DashboardSummary, Deal, PipelineStage,
@@ -37,7 +40,7 @@ export async function getDashboardSummary(range = "7d"): Promise<DashboardSummar
   const store = await readStore();
   if (await isLiveOrg()) {
     return {
-      kpis: [], funnel: [], trend: { "7d": [], "30d": [], "90d": [] }, agents: [], enquiries: [], retailers: [], content: [], amazon: [],
+      kpis: [], funnel: liveFunnel(store.deals), trend: { "7d": [], "30d": [], "90d": [] }, agents: [], enquiries: [], retailers: store.retailers.slice(0, 5), content: [], amazon: [],
       approvals: store.approvals.filter((a) => a.status === "pending").slice(0, 3),
       tasks: store.tasks.filter((t) => t.status === "open").slice(0, 4),
     };
@@ -68,8 +71,8 @@ export async function getCurrentUser() {
 export async function getAgents() { await tick(); return sampleOr([], () => m.agents); }
 export async function getEnquiries() { await tick(); return sampleOr([], () => m.enquiries); }
 export async function getConversations(): Promise<Conversation[]> { await tick(); return sampleOr([], () => m.conversations); }
-export async function getCustomers(): Promise<Customer[]> { await tick(); return sampleOr([], () => m.customers); }
-export async function getCustomer(id: string) { await tick(); return sampleOr(null, () => m.customers.find((c) => c.id === id) ?? null); }
+export async function getCustomers(): Promise<Customer[]> { await tick(); return (await isLiveOrg()) ? liveCustomers() : m.customers; }
+export async function getCustomer(id: string) { await tick(); return (await isLiveOrg()) ? liveCustomer(id) : (m.customers.find((c) => c.id === id) ?? null); }
 export async function getRetailers(): Promise<Retailer[]> { await tick(); return (await readStore()).retailers; }
 export async function getRetailer(id: string) { await tick(); return (await readStore()).retailers.find((r) => r.id === id) ?? null; }
 export async function getProducts() { await tick(); return sampleOr([], () => m.products); }
@@ -251,6 +254,7 @@ export async function simulatePublishSocialPost(id: string): Promise<SocialResul
 
 export async function getDeals(): Promise<Deal[]> { await tick(); return (await readStore()).deals; }
 export async function moveDeal(id: string, stage: PipelineStage): Promise<Deal | null> {
+  if (await isLiveOrg()) return liveMoveDeal(id, stage);
   const d = (await writableStore()).deals.find((x) => x.id === id);
   if (!d) return null;
   d.stage = stage;
@@ -283,7 +287,13 @@ export async function getReports(): Promise<ReportSection[]> {
 }
 
 export async function getSearchIndex() {
-  if (await isLiveOrg()) return [];
+  if (await isLiveOrg()) {
+    const [customers, retailers] = [await liveCustomers(), (await readStore()).retailers];
+    return [
+      ...customers.map((c) => ({ label: c.name, hint: "Customer", href: `/customers/${c.id}` })),
+      ...retailers.map((r) => ({ label: r.business, hint: "Retailer", href: `/retailers/${r.id}` })),
+    ];
+  }
   return [
     ...m.customers.map((c) => ({ label: c.name, hint: "Customer", href: `/customers/${c.id}` })),
     ...m.retailers.map((r) => ({ label: r.business, hint: "Retailer", href: `/retailers/${r.id}` })),
@@ -300,6 +310,7 @@ export type QueueResult =
 
 /** The text is always rebuilt on the server from the sample records; the browser only names the record. */
 export async function queueAgentAction(agent: QueueAgent, ref: string): Promise<QueueResult> {
+  if (await isLiveOrg()) return { ok: false, reason: "not_found", error: "This agent action is not connected to the database yet." };
   const s = await writableStore();
   const key = `${agent}:${ref}`;
   const prior = s.links[key] ? s.approvals.find((a) => a.id === s.links[key]) : undefined;
@@ -357,6 +368,7 @@ export async function getDiscovery(): Promise<{ note: string; candidates: Discov
 export type AddLeadResult = { ok: true; retailer: Retailer } | { ok: false; reason: "not_found" | "exists"; error: string };
 
 export async function addDiscoveredRetailer(id: string): Promise<AddLeadResult> {
+  if (await isLiveOrg()) return { ok: false, reason: "not_found", error: "Discovery candidates are sample data and are not available to a live organisation." };
   const c = discoveryCandidates.find((x) => x.id === id);
   if (!c) return { ok: false, reason: "not_found", error: "Candidate not found." };
   const s = await writableStore();
@@ -427,15 +439,36 @@ export async function getOrchestratorBrief(): Promise<OrchestratorBrief> {
 function liveBrief(s: Store): OrchestratorBrief {
   const pending = (k: AgentKey) => s.approvals.filter((a) => a.status === "pending" && a.generatedBy === k).length;
   const open = s.tasks.filter((t) => t.status === "open").length;
-  const hrefs: Record<AgentKey, string> = { b2c: "/b2c", b2b: "/b2b", amazon: "/amazon", content: "/content", crm: "/tasks" };
-  const agents = (Object.keys(hrefs) as AgentKey[]).map((key) => ({
-    key, name: AGENT_NAMES[key], href: hrefs[key], pending: pending(key),
-    headline: key === "crm" ? `${open} open task${open === 1 ? "" : "s"}` : "Not connected to the database yet",
-  }));
+  const hot = s.retailers.filter((r) => r.temperature === "HOT").length;
+  const negotiating = s.deals.filter((d) => d.stage === "negotiation").length;
+  const hrefs: Record<AgentKey, string> = { b2c: "/b2c", b2b: "/b2b", amazon: "/amazon", content: "/content", crm: "/crm" };
+  const headline = (key: AgentKey) =>
+    key === "crm" ? `${open} open task${open === 1 ? "" : "s"}, ${negotiating} deal${negotiating === 1 ? "" : "s"} in negotiation`
+    : key === "b2b" ? `${hot} hot lead${hot === 1 ? "" : "s"}, ${s.retailers.length} retailer${s.retailers.length === 1 ? "" : "s"} tracked`
+    : "Not connected to the database yet";
+  const agents = (Object.keys(hrefs) as AgentKey[]).map((key) => ({ key, name: AGENT_NAMES[key], href: hrefs[key], pending: pending(key), headline: headline(key) }));
   return {
     agents,
     recommendations: buildSuggestions({ tasks: s.tasks, deals: s.deals, retailers: s.retailers, approvals: s.approvals, amazon: [] }).slice(0, 5),
     feed: s.activity.slice(0, 8),
-    totals: { pending: s.approvals.filter((a) => a.status === "pending").length, openTasks: open, hotLeads: 0 },
+    totals: { pending: s.approvals.filter((a) => a.status === "pending").length, openTasks: open, hotLeads: hot },
   };
+}
+
+/* ---------- Creating customers and retailers (live organisations only: the demo has no create form) ---------- */
+
+export async function createCustomer(input: CustomerInput): Promise<Customer | null> {
+  return (await isLiveOrg()) ? liveCreateCustomer(input) : null;
+}
+
+/** Creates the retailer and its first lead in the pipeline. Returns null in demo mode, where the sample data is read-only. */
+export async function createRetailer(input: RetailerInput): Promise<Retailer | null> {
+  return (await isLiveOrg()) ? liveCreateRetailer(input) : null;
+}
+
+/** The pipeline funnel for a live organisation, counted from its real leads (lost leads are not part of the funnel). */
+function liveFunnel(deals: Deal[]): DashboardSummary["funnel"] {
+  return (["new", "qualified", "contacted", "interested", "negotiation", "won"] as const).map((stage) => ({
+    stage, label: STAGE_LABELS[stage], count: deals.filter((d) => d.stage === stage).length,
+  }));
 }

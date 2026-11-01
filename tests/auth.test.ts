@@ -11,8 +11,17 @@ const g = vi.hoisted(() => ({ fake: { user: null, rows: [] } as { user: { id: st
 vi.mock("@/lib/supabase/server", () => ({
   createSupabaseServerClient: async () => {
     const f = g.fake as Fake;
-    const query = { select: () => query, eq: () => query, order: () => query, limit: async () => ({ data: f.rows }) };
-    return { auth: { getUser: async () => (f.user ? { data: { user: f.user }, error: null } : { data: { user: null }, error: { message: "no session" } }) }, from: () => query };
+    // only the memberships lookup returns rows; every other table is empty (a brand-new live organisation)
+    const make = (table: string) => {
+      const data = table === "memberships" ? f.rows : [];
+      const query: Record<string, unknown> = {
+        select: () => query, eq: () => query, not: () => query, in: () => query, order: () => query,
+        limit: () => query, maybeSingle: () => query,
+        then: (resolve: (v: { data: unknown; error: null }) => void) => resolve({ data, error: null }),
+      };
+      return query;
+    };
+    return { auth: { getUser: async () => (f.user ? { data: { user: f.user }, error: null } : { data: { user: null }, error: { message: "no session" } }) }, from: make };
   },
 }));
 vi.mock("@supabase/ssr", () => ({
@@ -159,7 +168,7 @@ describe("static guarantees", () => {
     for (const r of routes) {
       const src = read(r);
       const handlers = [...src.matchAll(/export async function (GET|POST|PATCH|PUT|DELETE)\(/g)].length;
-      const guards = [...src.matchAll(/await deny\("/g)].length;
+      const guards = [...src.matchAll(/await deny\(/g)].length;
       expect(guards, r).toBe(handlers);
     }
   });

@@ -1,6 +1,5 @@
-import { isLiveOrg } from "@/lib/auth/access";
-import { NotConnected } from "@/components/not-connected";
 import type { Metadata } from "next";
+import { isLiveOrg } from "@/lib/auth/access";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getActivities, getConversations, getCustomer, getTasks } from "@/services";
@@ -10,8 +9,8 @@ import { ActivityTimeline } from "@/components/domain";
 export const metadata: Metadata = { title: "Customer" };
 
 export default async function CustomerPage({ params }: { params: Promise<{ id: string }> }) {
-  if (await isLiveOrg()) return <NotConnected title="Customer" />;
   const { id } = await params;
+  const live = await isLiveOrg();
   const customer = await getCustomer(id);
   if (!customer) notFound();
   const [convos, tasks, activities] = await Promise.all([getConversations(), getTasks(), getActivities()]);
@@ -35,8 +34,9 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
           <DashboardCard>
             <SectionHeader title="History" />
             <div className="grid three" style={{ marginBottom: 18 }}>
-              <div><div className="muted">Amazon clicks</div><div className="serif" style={{ fontSize: 30 }}>{customer.amazonClicks}</div></div>
-              <div><div className="muted">Flipkart clicks</div><div className="serif" style={{ fontSize: 30 }}>{customer.flipkartClicks}</div></div>
+              {/* click counts have no database column, so a live organisation sees purchases only */}
+              {!live && <div><div className="muted">Amazon clicks</div><div className="serif" style={{ fontSize: 30 }}>{customer.amazonClicks}</div></div>}
+              {!live && <div><div className="muted">Flipkart clicks</div><div className="serif" style={{ fontSize: 30 }}>{customer.flipkartClicks}</div></div>}
               <div><div className="muted">Purchases</div><div className="serif" style={{ fontSize: 30 }}>{customer.purchases}</div></div>
             </div>
             <h3 className="eyebrow">Conversations</h3>

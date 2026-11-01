@@ -26,7 +26,7 @@ vi.mock("@/lib/supabase/server", () => ({
         insert: (payload: Row) => { call.op = "insert"; call.payload = payload; return q; },
         update: (payload: Row) => { call.op = "update"; call.payload = payload; return q; },
         eq: (k: string, v: unknown) => { call.eq[k] = v; return q; },
-        in: () => q, order: () => q, limit: () => q,
+        in: () => q, not: () => q, order: () => q, limit: () => q,
         single: () => { single = true; return q; },
         maybeSingle: () => { single = true; return q; },
         then: (resolve: (v: { data: unknown; error: unknown }) => void) => {
@@ -95,7 +95,7 @@ describe("sample data never reaches a live organisation", () => {
     expect(await getAgents()).toEqual([]);
     expect(await getCustomers()).toEqual([]);
     expect(await getConversations()).toEqual([]);
-    expect(await getRetailers()).toEqual([]);
+    expect(await getRetailers()).toEqual([]); // empty because this organisation has none, never the sample retailers
     expect(await getNotifications()).toEqual([]);
     expect(await getSearchIndex()).toEqual([]);
     expect(await getReports()).toEqual([]);
@@ -108,7 +108,8 @@ describe("sample data never reaches a live organisation", () => {
     expect(d.tasks.map((t) => t.id)).toEqual(["t1"]);
     const b = await getOrchestratorBrief();
     expect(b.totals).toEqual({ pending: 1, openTasks: 1, hotLeads: 0 });
-    expect(b.agents.find((a) => a.key === "b2b")!.headline).toMatch(/Not connected/);
+    expect(b.agents.find((a) => a.key === "b2b")!.headline).toMatch(/0 hot leads, 0 retailers/);
+    expect(b.agents.find((a) => a.key === "b2c")!.headline).toMatch(/Not connected/);
     expect(JSON.stringify(b)).not.toMatch(/SAMPLE|Aurelia|Moonlit/);
   });
   it("writes that are not connected yet fail instead of touching the sample store", async () => {
@@ -206,5 +207,136 @@ describe("mapping helpers", () => {
     expect(toTask({ id: "x", title: "t", source: "s", due_at: null, priority: "weird", status: "odd", assignee_id: null, related_ref: null }, new Map()))
       .toMatchObject({ priority: "medium", status: "open" });
     expect(toApproval({ id: "a", title: "t", type: "Content", generated_by: "nobody", status: "pending", preview: "p", meta: null, created_at: now.toISOString() }, now).generatedBy).toBe("crm");
+  });
+});
+
+/* ---------- Slice 2: customers, retailers, leads (fake client: proves app logic, not the real database) ---------- */
+import { POST as postResource } from "@/app/api/[resource]/route";
+import { createCustomer, createRetailer, getCustomer, moveDeal } from "@/services";
+import { parseCustomerInput, parseRetailerInput } from "@/lib/validate";
+import { mapsSearchUrl, toCustomer, toDeal, toRetailer } from "@/services/live-map";
+
+const C1 = "22222222-2222-4222-8222-222222222222";
+const C_OTHER = "55555555-5555-4555-8555-555555555555";
+const R1 = "33333333-3333-4333-8333-333333333333";
+const L1 = "44444444-4444-4444-8444-444444444444";
+const L_OTHER = "77777777-7777-4777-8777-777777777777";
+const stamp = new Date().toISOString();
+const blankRetailer = { location: null, category: null, contact: null, email: null, phone: null, instagram: null, website: null, qualification: null, created_at: stamp };
+const seedPipeline = () => {
+  h.tables.customers = [
+    { id: C1, org_id: ORG, name: "Meera", instagram: "@meera", phone: null, email: null, city: "Pune", interests: ["saree"], created_at: stamp },
+    { id: C_OTHER, org_id: "other-org", name: "Not mine", instagram: null, phone: null, email: null, city: null, interests: null, created_at: stamp },
+  ];
+  h.tables.orders = [{ customer_id: C1, org_id: ORG }, { customer_id: C1, org_id: ORG }];
+  h.tables.retailers = [
+    { id: R1, org_id: ORG, business: "Aurelia Boutique", ...blankRetailer, location: "Pune", category: "Boutique" },
+    { id: "66666666-6666-4666-8666-666666666666", org_id: "other-org", business: "Other Org Shop", ...blankRetailer },
+  ];
+  h.tables.leads = [
+    { id: L1, org_id: ORG, retailer_id: R1, stage: "negotiation", score: 82, temperature: "HOT", owner_id: "u1", last_activity_at: stamp },
+    { id: L_OTHER, org_id: "other-org", retailer_id: R1, stage: "won", score: 1, temperature: "COLD", owner_id: null, last_activity_at: stamp },
+  ];
+};
+const post = (resource: string, body: unknown) =>
+  postResource(new Request(`https://app.test/api/${resource}`, {
+    method: "POST", headers: { host: "app.test", origin: "https://app.test", "content-type": "application/json" }, body: JSON.stringify(body),
+  }), { params: Promise.resolve({ resource }) });
+
+describe("slice 2: live customers, retailers and leads", () => {
+  beforeEach(seedPipeline);
+
+  it("reads only this organisation's customers, with purchases counted from orders", async () => {
+    const list = await getCustomers();
+    expect(list.map((c) => c.name)).toEqual(["Meera"]);
+    expect(list[0]).toMatchObject({ purchases: 2, amazonClicks: 0, phone: "", interests: ["saree"] });
+    expect((await getCustomer(C1))?.name).toBe("Meera");
+    expect(await getCustomer(C_OTHER)).toBeNull();
+    expect(await getCustomer("not-a-uuid")).toBeNull();
+  });
+  it("maps a retailer with its lead and never counts another organisation's lead", async () => {
+    const [r] = await getRetailers();
+    expect(r).toMatchObject({ id: R1, business: "Aurelia Boutique", score: 82, temperature: "HOT", stage: "negotiation", status: "Negotiation", email: "Not recorded" });
+    expect(r.mapsUrl).toBe(mapsSearchUrl("Aurelia Boutique", "Pune"));
+    const summary = await getDashboardSummary();
+    expect(summary.funnel.find((f) => f.stage === "negotiation")?.count).toBe(1);
+    expect(summary.funnel.find((f) => f.stage === "won")?.count).toBe(0);
+  });
+  it("scopes every slice 2 query by the organisation from the verified session", async () => {
+    h.calls.length = 0;
+    await Promise.all([getCustomers(), getRetailers(), getSearchIndex()]);
+    const q = h.calls.filter((c) => ["customers", "retailers", "leads", "orders"].includes(c.table));
+    expect(q.length).toBeGreaterThanOrEqual(4);
+    for (const c of q) expect(c.eq.org_id, c.table).toBe(ORG);
+  });
+  it("search covers the organisation's own customers and retailers only", async () => {
+    const labels = (await getSearchIndex()).map((s) => s.label);
+    expect(labels).toEqual(expect.arrayContaining(["Meera", "Aurelia Boutique"]));
+    expect(labels).not.toContain("Other Org Shop");
+  });
+  it("creating a customer sends the session's organisation, ignoring any organisation in the body", async () => {
+    h.calls.length = 0;
+    const res = await post("customers", { name: "Asha", city: "Delhi", org_id: "attacker-org", interests: ["kurta"] });
+    expect(res.status).toBe(201);
+    const insert = h.calls.find((c) => c.table === "customers" && c.op === "insert")!;
+    expect(insert.payload).toMatchObject({ org_id: ORG, name: "Asha", city: "Delhi" });
+    expect(insert.payload).not.toHaveProperty("id");
+  });
+  it("creating a retailer also creates its first lead at stage new", async () => {
+    h.calls.length = 0;
+    const res = await post("retailers", { business: "Moonlit Studio", location: "Jaipur" });
+    expect(res.status).toBe(201);
+    expect(h.calls.find((c) => c.table === "retailers" && c.op === "insert")!.payload).toMatchObject({ org_id: ORG, business: "Moonlit Studio" });
+    expect(h.calls.find((c) => c.table === "leads" && c.op === "insert")!.payload).toMatchObject({ org_id: ORG, stage: "new" });
+  });
+  it("rejects invalid input with 400 and writes nothing", async () => {
+    h.calls.length = 0;
+    expect((await post("customers", { name: "" })).status).toBe(400);
+    expect((await post("retailers", {})).status).toBe(400);
+    expect(h.calls.filter((c) => c.op === "insert")).toEqual([]);
+  });
+  it("moving a deal updates the lead stage inside the organisation only", async () => {
+    h.calls.length = 0;
+    expect((await moveDeal(L1, "won"))?.stage).toBe("won");
+    const upd = h.calls.find((c) => c.table === "leads" && c.op === "update")!;
+    expect(upd.eq).toMatchObject({ org_id: ORG, id: L1 });
+    expect(await moveDeal(L_OTHER, "lost")).toBeNull();
+    expect(await moveDeal("nope", "lost")).toBeNull();
+  });
+  it("a viewer cannot create records (403); a staff member can", async () => {
+    h.tables.memberships = [{ user_id: "u1", org_id: ORG, role: "viewer", organizations: { is_demo: false } }];
+    expect((await post("customers", { name: "Asha" })).status).toBe(403);
+    expect((await post("retailers", { business: "X" })).status).toBe(403);
+    h.tables.memberships = [{ user_id: "u1", org_id: ORG, role: "staff", organizations: { is_demo: false } }];
+    expect((await post("customers", { name: "Asha" })).status).toBe(201);
+  });
+  it("a demo organisation cannot create records and sees sample data, not live rows", async () => {
+    setMembership(true);
+    expect(await createCustomer({ name: "Asha" } as never)).toBeNull();
+    expect(await createRetailer({ business: "X" } as never)).toBeNull();
+    expect((await getCustomers()).some((c) => c.name === "Meera")).toBe(false);
+    expect((await getRetailers()).some((r) => r.business === "Aurelia Boutique" && r.id === R1)).toBe(false);
+    expect((await getRetailers()).length).toBeGreaterThan(0);
+  });
+  it("a database failure is not reported as success", async () => {
+    h.insertError = { message: "boom" };
+    await expect(post("customers", { name: "Asha" })).rejects.toBeDefined();
+  });
+});
+
+describe("slice 2: validation and mapping helpers", () => {
+  it("parses customer and retailer input, blanking empty optionals and rejecting missing names", () => {
+    expect(parseCustomerInput({ name: " Asha ", city: "" })).toMatchObject({ name: "Asha", city: null });
+    expect(parseCustomerInput({ name: "" })).toBeNull();
+    expect(parseCustomerInput(null)).toBeNull();
+    expect(parseRetailerInput({ business: "Shop" })).toMatchObject({ business: "Shop" });
+    expect(parseRetailerInput({ location: "Pune" })).toBeNull();
+  });
+  it("falls back safely for rows with missing data or an unknown stage", () => {
+    const row = { id: "r", business: "B", ...blankRetailer };
+    expect(toRetailer(row)).toMatchObject({ stage: "new", score: 0, temperature: "COLD", contact: "Not recorded" });
+    expect(toCustomer({ id: "c", name: "N", instagram: null, phone: null, email: null, city: null, interests: null, created_at: stamp }, 0).interests).toEqual([]);
+    const d = toDeal({ id: "l", retailer_id: "r", stage: "bogus", score: null, temperature: null, owner_id: null, last_activity_at: stamp }, row, new Map());
+    expect(d).toMatchObject({ stage: "new", score: 0, owner: "Unassigned" });
   });
 });

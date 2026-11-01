@@ -1,6 +1,5 @@
-import { isLiveOrg } from "@/lib/auth/access";
-import { NotConnected } from "@/components/not-connected";
 import type { Metadata } from "next";
+import { isLiveOrg } from "@/lib/auth/access";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ExternalLink } from "lucide-react";
@@ -15,8 +14,8 @@ import { STAGE_LABELS } from "@/lib/agents";
 export const metadata: Metadata = { title: "Retailer" };
 
 export default async function RetailerPage({ params }: { params: Promise<{ id: string }> }) {
-  if (await isLiveOrg()) return <NotConnected title="Retailer" />;
   const { id } = await params;
+  const live = await isLiveOrg();
   const r = await getRetailer(id);
   if (!r) notFound();
   const [tasks, activities, links] = await Promise.all([getTasks(), getActivities(), getActionLinks()]);
@@ -47,6 +46,8 @@ export default async function RetailerPage({ params }: { params: Promise<{ id: s
               <dt>Notes</dt><dd>{r.qualification}</dd>
             </dl>
           </DashboardCard>
+          {!live && (
+            <>
           <DashboardCard>
             <SectionHeader title="Qualification factors" extra={<SimBadge>SAMPLE · rule-based</SimBadge>} />
             <FactorList factors={qualificationFactors(r)} />
@@ -57,6 +58,8 @@ export default async function RetailerPage({ params }: { params: Promise<{ id: s
             <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>{follow.reason} Drafting sends nothing: the email waits in Approvals.</p>
             <QueueButton agent="b2b" refId={r.id} label="Draft follow-up email (demo)" link={links[`b2b:${r.id}`]} />
           </DashboardCard>
+            </>
+          )}
         </div>
         <div className="stack">
           <DashboardCard>

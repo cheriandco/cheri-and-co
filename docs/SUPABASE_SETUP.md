@@ -55,11 +55,15 @@ the built-in sample data instead. Do these in the dashboard / SQL editor as the 
 4. Create a task, then check it with `select title, org_id from public.tasks;`.
 Optionally add a second organisation `('Cheri & Co. (sample demo)', true)` and a second membership to see the sample data.
 
-## What is connected to the database (this slice)
-Tasks, Approvals (decisions go through `decide_approval()`), Audit log, Agent activity, and the dashboard and orchestrator
-counts built from them. Not connected yet: customers, retailers, leads, products, orders, content items, and the agents'
-own inputs (B2C conversations, Amazon data, B2B discovery). For a live organisation these show "Not connected yet" or empty,
-never sample data.
+## What is connected to the database
+- Slice 1: Tasks, Approvals (decisions go through `decide_approval()`), Audit log, Agent activity, dashboard and orchestrator counts.
+- Slice 2: Customers, Retailers and Leads (the B2B pipeline). Read, create (`POST /api/customers`, `POST /api/retailers`, which also
+  creates the retailer's first lead at stage `new`) and move a deal between stages. No delete UI exists, so none is wired.
+  Gaps: no Amazon/Flipkart click columns (shown as 0 and hidden for live orgs); `purchases` = count of the customer's orders;
+  retailer score/temperature/stage live on `leads`; the Maps link is a derived search link; Qualification factors, follow-up
+  recommendations and discovery candidates are sample-only and hidden for live orgs.
+- Not connected yet: products, orders, content items, and the agents' own inputs (B2C conversations, Amazon data, B2B discovery).
+  For a live organisation these show "Not connected yet" or empty, never sample data.
 
 ## Known limitations
 - Agent data is still sample data in server memory; this work does not store business data yet.
