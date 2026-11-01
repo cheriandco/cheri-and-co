@@ -6,13 +6,16 @@
  *  inside the services once the production build is approved. */
 import { cookies } from "next/headers";
 import { approvals, deals, tasks } from "@/mocks/data";
+import { socialPosts } from "@/mocks/social-samples";
 import type { Approval, AuditEntry, Deal, Task } from "@/types";
+import type { SocialPost } from "@/types/social";
 
 export interface Store {
   approvals: Approval[];
   tasks: Task[];
   deals: Deal[];
   audit: AuditEntry[];
+  social: SocialPost[];
 }
 
 const seed = (): Store => ({
@@ -20,6 +23,7 @@ const seed = (): Store => ({
   tasks: structuredClone(tasks),
   deals: structuredClone(deals),
   audit: [],
+  social: structuredClone(socialPosts),
 });
 
 const COOKIE = "cheri_demo_visitor";

@@ -11,6 +11,8 @@ import type {
   ReportSection, Retailer, Task,
 } from "@/types";
 import type { ContentDraft } from "@/types/content-agent";
+import type { SocialPost, SocialPostInput, SocialPostView } from "@/types/social";
+import { addDays, isoDate, renderPostForApproval, sampleMetricsFor, toView } from "@/lib/social/posts";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -133,6 +135,79 @@ function contentClaimsFor(input: ContentRunInput): string[] {
   const t = input.target;
   const rec = t.type === "product" ? contentProducts.find((x) => x.id === t.id) : contentPacks.find((x) => x.id === t.id);
   return rec ? [...rec.approvedClaims] : [];
+}
+
+/* ---------- Social media (Content & Marketing Agent). Demo only: nothing is ever posted anywhere. ---------- */
+
+export async function getSocialPosts(): Promise<SocialPostView[]> {
+  await tick();
+  const s = await readStore();
+  const today = new Date();
+  return s.social.map((p) => toView(p, today, p.approvalId ? s.approvals.find((a) => a.id === p.approvalId)?.status : undefined));
+}
+
+export async function createSocialPost(input: SocialPostInput): Promise<SocialPost> {
+  const { scheduledFor, ...rest } = input;
+  const post: SocialPost = {
+    id: `sp-${crypto.randomUUID().slice(0, 8)}`, ...rest, isSample: false, tone: "rose",
+    scheduledFor: scheduledFor ?? isoDate(addDays(new Date(), 7)),
+  };
+  (await writableStore()).social.unshift(post);
+  return post;
+}
+
+export type SocialResult =
+  | { ok: true; post: SocialPostView }
+  | { ok: false; reason: "not_found" | "invalid_state" | "prohibited_claims"; error: string; detail?: string[] };
+
+const viewOf = (s: Awaited<ReturnType<typeof writableStore>>, p: SocialPost): SocialPostView =>
+  toView(p, new Date(), p.approvalId ? s.approvals.find((a) => a.id === p.approvalId)?.status : undefined);
+
+/** Edit is allowed while the post is a draft or was rejected. Editing resets it to a fresh draft. */
+export async function updateSocialPost(id: string, input: SocialPostInput): Promise<SocialResult> {
+  const s = await writableStore();
+  const p = s.social.find((x) => x.id === id);
+  if (!p) return { ok: false, reason: "not_found", error: "Post not found." };
+  const status = viewOf(s, p).status;
+  if (status !== "draft" && status !== "rejected") return { ok: false, reason: "invalid_state", error: "Only drafts and rejected posts can be edited." };
+  const { scheduledFor, ...rest } = input;
+  Object.assign(p, rest, scheduledFor ? { scheduledFor, dayOffset: undefined } : {});
+  p.approvalId = undefined;
+  p.seedStatus = "draft";
+  return { ok: true, post: viewOf(s, p) };
+}
+
+/** Queues the post as a pending approval. The claim guard runs first, and nothing is published. */
+export async function submitSocialPost(id: string): Promise<SocialResult> {
+  const s = await writableStore();
+  const p = s.social.find((x) => x.id === id);
+  if (!p) return { ok: false, reason: "not_found", error: "Post not found." };
+  if (viewOf(s, p).status !== "draft") return { ok: false, reason: "invalid_state", error: "Only drafts can be submitted for approval." };
+  if (!p.caption.trim()) return { ok: false, reason: "invalid_state", error: "Add a caption before submitting." };
+  const preview = renderPostForApproval(p);
+  const violations = findProhibitedClaims(preview, []);
+  if (violations.length) {
+    return { ok: false, reason: "prohibited_claims", error: "The post contains wording that needs client-approved claims.", detail: violations.map((v) => `${v.label}: "${v.match}"`) };
+  }
+  const approval: Approval = {
+    id: `a-${crypto.randomUUID().slice(0, 8)}`, title: `${p.title} · ${p.platform} post`, type: "Content", generatedBy: "content",
+    created: "just now", status: "pending", preview, tone: "rose",
+    meta: { kind: "content_draft", subject: p.title, isSample: true, allowedClaims: [] },
+  };
+  s.approvals.unshift(approval);
+  p.approvalId = approval.id;
+  return { ok: true, post: viewOf(s, p) };
+}
+
+/** "Publishes" an approved post in the simulation only. No platform is contacted. */
+export async function simulatePublishSocialPost(id: string): Promise<SocialResult> {
+  const s = await writableStore();
+  const p = s.social.find((x) => x.id === id);
+  if (!p) return { ok: false, reason: "not_found", error: "Post not found." };
+  if (viewOf(s, p).status !== "approved") return { ok: false, reason: "invalid_state", error: "Only approved posts can be simulated as published." };
+  p.simulatedPublished = true;
+  p.metrics = sampleMetricsFor(p.id);
+  return { ok: true, post: viewOf(s, p) };
 }
 
 export async function getDeals(): Promise<Deal[]> { await tick(); return (await readStore()).deals; }

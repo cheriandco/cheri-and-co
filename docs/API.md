@@ -94,6 +94,16 @@ covers the reads; gaps are in §3.
 2. Endpoints will move behind authorisation by role, with input validated server-side.
 3. The service layer remains the only place that changes when moving from mock to a database.
 
+## 4a. Social media demo endpoints (Content & Marketing Agent)
+Demo only: every call works on the visitor's private in-memory copy and nothing is posted to any platform.
+- `GET /api/social/posts`: sample posts plus the visitor's own.
+- `POST /api/social/posts`: create a draft (Instagram, Facebook or LinkedIn). 201, or 400 on invalid input.
+- `POST /api/social/posts/:id/edit`: edit a draft or rejected post (409 otherwise).
+- `POST /api/social/posts/:id/submit`: queue the post as a pending approval. 422 if the claim guard finds prices, offers or stock claims; 409 unless a draft.
+- `POST /api/social/posts/:id/publish`: "simulate publish" an approved post (409 otherwise). Attaches SAMPLE metrics.
+- `POST /api/social/assist`: template-based ideas, captions and creative briefs, labelled "DEMO RESPONSE". No AI model is called.
+Status follows the linked approval: pending, approved, rejected. Decisions are made through the existing `/api/approvals/:id/:action`.
+
 ## 5. Open questions
 1. Authentication method (email/password, magic link, SSO) and who the first users are.
 2. Roles and which actions each may take (e.g. who may approve or reject).

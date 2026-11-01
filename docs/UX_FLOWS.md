@@ -77,6 +77,11 @@ Each item below was specified for IMI TIARA and is **not approved** for Cheri & 
 9. Who approves content and replies, and is more than one approval level needed?
 10. What should happen after approval (the "Execute" step): send through which channel?
 
+## 5a. Social media flow (demo, inside Content & Marketing)
+Create Post (title, topic, platform, caption, hashtags, creative brief, image direction; optional demo assistant) → Save draft →
+Submit for approval (demo) → Approvals (Approve or Reject, simulated) → Simulate publish (demo) → Published and Performance (SAMPLE metrics).
+The Content Calendar shows a five-week grid with platform and status. Nothing is posted; every label says so.
+
 ## 6. Dependencies
 Answers to §5; client-owned accounts for each integration; authentication and roles (`docs/API.md` §5);
 a real product catalogue (`docs/DATABASE.md` §4); a staging environment for user-acceptance testing.

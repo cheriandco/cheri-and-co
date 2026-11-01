@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { ChevronRight } from "lucide-react";
-import { getApprovals, getBrandRules, getContent, getContentSamples, getProducts } from "@/services";
+import { getApprovals, getBrandRules, getContent, getContentSamples, getProducts, getSocialPosts } from "@/services";
+import { SOCIAL_SAMPLE_NOTE } from "@/mocks/social-samples";
+import { PostComposer } from "@/components/social";
+import { CalendarGrid, MetricsTable, PlatformSummary, PostList, SocialStats } from "@/components/social-views";
 import { ContentAgentPanel } from "@/components/content-agent-panel";
 import { PageHeader, Tabs, DashboardCard, DataTable, SectionHeader, StatusBadge, Thumb, Money, EmptyState } from "@/components/ui";
 import { ContentList } from "@/components/domain";
@@ -9,16 +12,21 @@ import { ApprovalQueue } from "@/components/interactive";
 export const metadata: Metadata = { title: "Content & Marketing" };
 
 const TABS = [
-  ["overview", "Overview"], ["calendar", "Content Calendar"], ["products", "Product Library"], ["brand", "Brand Brain"],
+  ["overview", "Overview"], ["calendar", "Content Calendar"], ["create", "Create Post"], ["products", "Product Library"], ["brand", "Brand Brain"],
   ["assets", "Creative Assets"], ["approvals", "Approvals"], ["published", "Published"], ["performance", "Performance"],
 ].map(([id, label]) => ({ id, label }));
 
 const WORKFLOW = ["Product Library", "Brand Brain", "Content Strategy", "Content Calendar", "Claude Creative Brain (planned)", "Creative Generation", "Canva Design (brief only)", "Human Approval", "Manual Publish (not automated)", "Performance"];
 
-export default async function ContentPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
-  const { tab = "overview" } = await searchParams;
-  const [content, rules, products, approvals, samples] = await Promise.all([getContent(), getBrandRules(), getProducts(), getApprovals(), getContentSamples()]);
-  const published = content.filter((c) => c.status === "published");
+export default async function ContentPage({ searchParams }: { searchParams: Promise<{ tab?: string; edit?: string }> }) {
+  const { tab = "overview", edit } = await searchParams;
+  const [content, rules, products, approvals, samples, social] = await Promise.all([getContent(), getBrandRules(), getProducts(), getApprovals(), getContentSamples(), getSocialPosts()]);
+  const today = new Date();
+  const todayIso = today.toISOString().slice(0, 10);
+  const byDate = [...social].sort((a, b) => a.scheduledFor.localeCompare(b.scheduledFor));
+  const upcoming = byDate.filter((p) => p.scheduledFor >= todayIso && p.status !== "simulated_published").slice(0, 5);
+  const simulated = byDate.filter((p) => p.status === "simulated_published").reverse();
+  const editing = edit ? social.find((p) => p.id === edit && (p.status === "draft" || p.status === "rejected")) : undefined;
 
   return (
     <div className="stack">
@@ -28,6 +36,8 @@ export default async function ContentPage({ searchParams }: { searchParams: Prom
 
       {tab === "overview" && (
         <div className="stack">
+          <SocialStats posts={social} />
+          <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>{SOCIAL_SAMPLE_NOTE}</p>
           <ContentAgentPanel products={samples.products} packs={samples.packs} note={samples.note} />
           <DashboardCard>
             <SectionHeader title="How content gets made" />
@@ -41,13 +51,34 @@ export default async function ContentPage({ searchParams }: { searchParams: Prom
             </ol>
           </DashboardCard>
           <div className="grid even">
-            <DashboardCard><SectionHeader title="Coming up" href="/content?tab=calendar" /><ContentList items={content.filter((c) => c.status !== "published").slice(0, 4)} /></DashboardCard>
+            <DashboardCard><SectionHeader title="Coming up" href="/content?tab=calendar" /><PostList posts={upcoming} empty="Nothing planned" /></DashboardCard>
             <DashboardCard><SectionHeader title="Needs your review" href="/approvals" /><ApprovalQueue initial={approvals.filter((a) => a.status === "pending" && a.type === "Content")} compact /></DashboardCard>
           </div>
         </div>
       )}
 
-      {tab === "calendar" && <DashboardCard><ContentList items={content} /></DashboardCard>}
+      {tab === "calendar" && (
+        <div className="stack">
+          <DashboardCard>
+            <SectionHeader title="Social content calendar" extra={<span className="badge champagne plain">SAMPLE · planning only</span>} />
+            <CalendarGrid posts={social} today={today} />
+          </DashboardCard>
+          <div className="grid even">
+            <DashboardCard><SectionHeader title="Planned posts" /><PostList posts={byDate.filter((p) => p.status !== "simulated_published")} /></DashboardCard>
+            <div className="stack">
+              <PlatformSummary posts={social} />
+              <DashboardCard><SectionHeader title="Other planned content (sample)" /><ContentList items={content} /></DashboardCard>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "create" && (
+        <PostComposer key={editing?.id ?? "new"} postId={editing?.id} initial={editing && {
+          title: editing.title, topic: editing.topic, platform: editing.platform, caption: editing.caption, hashtags: editing.hashtags.join(" "),
+          creativeBrief: editing.creativeBrief, imageDirection: editing.imageDirection, scheduledFor: editing.scheduledFor,
+        }} />
+      )}
 
       {tab === "products" && (
         <DashboardCard flush>
@@ -78,17 +109,22 @@ export default async function ContentPage({ searchParams }: { searchParams: Prom
 
       {tab === "approvals" && <ApprovalQueue initial={approvals.filter((a) => a.type === "Content")} />}
 
-      {tab === "published" && <DashboardCard><ContentList items={published} /></DashboardCard>}
+      {tab === "published" && (
+        <DashboardCard>
+          <SectionHeader title="Simulated publishing" extra={<span className="badge info plain">SIMULATED · not posted to any platform</span>} />
+          <p className="muted" style={{ fontSize: 12.5, marginTop: 0 }}>These posts were marked as published inside the demo only. Nothing was sent to Instagram, Facebook or LinkedIn. Approve a post, then choose “Simulate publish (demo)”.</p>
+          <PostList posts={simulated} empty="No simulated posts yet" actions={false} />
+        </DashboardCard>
+      )}
 
       {tab === "performance" && (
-        <DashboardCard flush>
-          <DataTable rows={published} columns={[
-            { header: "Content", primary: true, cell: (c) => <>{c.name}<small>{c.platform} · {c.type}</small></> },
-            { header: "Published", cell: (c) => c.date },
-            { header: "Reach", cell: (c) => <span className="num">{c.reach?.toLocaleString("en-IN")}</span> },
-            { header: "Engagement", cell: (c) => <span className="num">{c.engagement}%</span> },
-          ]} />
-        </DashboardCard>
+        <div className="stack">
+          <DashboardCard>
+            <SectionHeader title="Content performance" extra={<span className="badge champagne plain">SAMPLE metrics · not real performance</span>} />
+            <p className="muted" style={{ fontSize: 12.5, marginTop: 0 }}>Invented numbers for demonstration. No platform is connected, so no real reach or engagement is measured.</p>
+            <MetricsTable posts={social} />
+          </DashboardCard>
+        </div>
       )}
     </div>
   );
