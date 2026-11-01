@@ -1,3 +1,5 @@
+import { isLiveOrg } from "@/lib/auth/access";
+import { NotConnected } from "@/components/not-connected";
 import type { Metadata } from "next";
 import { getActionLinks, getAmazon } from "@/services";
 import { pricePosition } from "@/lib/agent-logic";
@@ -10,6 +12,7 @@ export const metadata: Metadata = { title: "Amazon Intelligence" };
 const TABS = ["overview", "products", "competitors", "reviews", "pricing", "opportunities", "listings", "recommendations"].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) }));
 
 export default async function AmazonPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+  if (await isLiveOrg()) return <NotConnected title="Amazon Intelligence" />;
   const { tab = "overview" } = await searchParams;
   const [a, links] = await Promise.all([getAmazon(), getActionLinks()]);
   const top = [...a.rows].sort((x, y) => y.opportunity - x.opportunity);

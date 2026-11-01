@@ -5,7 +5,8 @@
  *  another visitor. Copies expire after a couple of hours and are capped in number. Replace with Supabase queries
  *  inside the services once the production build is approved. */
 import { cookies } from "next/headers";
-import { requireAccess } from "@/lib/auth/access";
+import { isLive, requireAccess } from "@/lib/auth/access";
+import { loadLiveStore } from "./live";
 import { activities, approvals, deals, retailers, tasks } from "@/mocks/data";
 import { socialPosts } from "@/mocks/social-samples";
 import type { Activity, Approval, AuditEntry, Deal, Retailer, Task } from "@/types";
@@ -61,7 +62,8 @@ function prune(now: number) {
 
 /** What the current visitor should see: their own copy if they have one, otherwise the pristine sample data. */
 export async function readStore(): Promise<Store> {
-  await requireAccess("data:read"); // data-layer check: a page that skipped the layout or proxy still cannot read
+  const user = await requireAccess("data:read"); // data-layer check: a page that skipped the layout or proxy still cannot read
+  if (isLive(user)) return loadLiveStore(); // a live organisation reads its own database rows, never the sample data
   try {
     const id = (await cookies()).get(COOKIE)?.value;
     const mine = id && ID_PATTERN.test(id) ? visitors.get(id) : undefined;
@@ -73,7 +75,9 @@ export async function readStore(): Promise<Store> {
 /** The current visitor's private copy, created on their first change. Never returns the shared sample data while
  *  serving a request, so a visitor's change cannot reach anyone else. */
 export async function writableStore(): Promise<Store> {
-  await requireAccess("data:read"); // who may change what is decided per route (deny); this blocks anonymous access
+  const user = await requireAccess("data:read"); // who may change what is decided per route (deny); this blocks anonymous access
+  // The sample store is a demo toy. A live organisation's writes go to the database through ./live, never here.
+  if (isLive(user)) throw new Error("This action is not connected to the database yet");
   let jar: Awaited<ReturnType<typeof cookies>>;
   try {
     jar = await cookies();

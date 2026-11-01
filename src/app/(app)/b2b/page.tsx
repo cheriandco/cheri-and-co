@@ -1,3 +1,5 @@
+import { isLiveOrg } from "@/lib/auth/access";
+import { NotConnected } from "@/components/not-connected";
 import type { Metadata } from "next";
 import { getActionLinks, getActivities, getDashboardSummary, getDiscovery, getRetailers } from "@/services";
 import { followUpFor } from "@/lib/agent-logic";
@@ -11,6 +13,7 @@ export const metadata: Metadata = { title: "B2B Leads" };
 const OPTIONS = [{ id: "all", label: "All" }, { id: "HOT", label: "Hot" }, { id: "WARM", label: "Warm" }, { id: "COLD", label: "Cold" }];
 
 export default async function B2BPage({ searchParams }: { searchParams: Promise<{ temp?: string }> }) {
+  if (await isLiveOrg()) return <NotConnected title="B2B Leads" />;
   const { temp = "all" } = await searchParams;
   const [all, summary, discovery, links, activity] = await Promise.all([getRetailers(), getDashboardSummary(), getDiscovery(), getActionLinks(), getActivities()]);
   const focus = all.filter((r) => r.stage !== "won" && r.stage !== "lost").sort((a, b) => b.score - a.score).slice(0, 4);

@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
 import { getCurrentUser, getDashboardSummary, getOrchestratorBrief } from "@/services";
+import { isLiveOrg } from "@/lib/auth/access";
 import { OrchestratorCard } from "@/components/agent-views";
 import { PageHeader, SectionHeader, DashboardCard } from "@/components/ui";
 import { KpiCard, AgentStatusCard, ConversationList, RetailerTable, ContentList, AmazonInsightTable } from "@/components/domain";
@@ -16,7 +17,7 @@ const greeting = () => {
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
   const { range } = await searchParams;
-  const [user, d, brief] = await Promise.all([getCurrentUser(), getDashboardSummary(range), getOrchestratorBrief()]);
+  const [user, d, brief, live] = await Promise.all([getCurrentUser(), getDashboardSummary(range), getOrchestratorBrief(), isLiveOrg()]);
 
   return (
     <div className="stack" style={{ gap: 28 }}>
@@ -27,12 +28,17 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         actions={<Suspense fallback={null}><RangeSelect /></Suspense>}
       />
 
+      {!live && (
       <section className="grid kpis" aria-label="Key metrics">
         {d.kpis.map((k) => <KpiCard key={k.id} kpi={k} />)}
       </section>
 
+      )}
+
       <OrchestratorCard brief={brief} />
 
+      {!live && (
+        <>
       <div className="grid two">
         <DashboardCard>
           <SectionHeader title="Enquiries & leads" />
@@ -55,11 +61,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </DashboardCard>
       </div>
 
+        </>
+      )}
+
       <section>
         <SectionHeader title="Awaiting your approval" href="/approvals" />
         <ApprovalQueue initial={d.approvals} compact />
       </section>
 
+      {!live && (
+        <>
       <DashboardCard flush>
         <div style={{ padding: "22px 22px 0" }}><SectionHeader title="B2B retailer leads" href="/b2b" /></div>
         <RetailerTable rows={d.retailers} />
@@ -75,6 +86,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <AmazonInsightTable rows={d.amazon} />
         </DashboardCard>
       </div>
+
+        </>
+      )}
 
       <section>
         <SectionHeader title="Tasks & follow-ups" href="/tasks" />

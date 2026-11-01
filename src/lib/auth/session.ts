@@ -18,7 +18,7 @@ export interface AuthUser {
 }
 
 /** What visitors are in demo mode: nobody is signed in, and the sample data is open by design. */
-export const DEMO_USER: AuthUser = { id: "demo", email: "", name: "Anika", role: "owner", orgId: null, isDemoOrg: true };
+export const DEMO_USER: AuthUser = { id: "demo", email: "", name: "Anika", role: "owner", orgId: "demo", isDemoOrg: true };
 
 const asString = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
 

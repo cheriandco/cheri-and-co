@@ -1,3 +1,5 @@
+import { isLiveOrg } from "@/lib/auth/access";
+import { NotConnected } from "@/components/not-connected";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -8,6 +10,7 @@ import { ActivityTimeline } from "@/components/domain";
 export const metadata: Metadata = { title: "Customer" };
 
 export default async function CustomerPage({ params }: { params: Promise<{ id: string }> }) {
+  if (await isLiveOrg()) return <NotConnected title="Customer" />;
   const { id } = await params;
   const customer = await getCustomer(id);
   if (!customer) notFound();

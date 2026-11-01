@@ -1,3 +1,5 @@
+import { isLiveOrg } from "@/lib/auth/access";
+import { NotConnected } from "@/components/not-connected";
 import type { Metadata } from "next";
 import { getReports } from "@/services";
 import { PageHeader, Tabs, DashboardCard, SectionHeader, Delta, DataTable } from "@/components/ui";
@@ -6,6 +8,7 @@ import { BarChart } from "@/components/charts";
 export const metadata: Metadata = { title: "Reports" };
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+  if (await isLiveOrg()) return <NotConnected title="Reports" />;
   const reports = await getReports();
   const { tab = reports[0].id } = await searchParams;
   const r = reports.find((x) => x.id === tab) ?? reports[0];

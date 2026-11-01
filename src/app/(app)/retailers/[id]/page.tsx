@@ -1,3 +1,5 @@
+import { isLiveOrg } from "@/lib/auth/access";
+import { NotConnected } from "@/components/not-connected";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -13,6 +15,7 @@ import { STAGE_LABELS } from "@/lib/agents";
 export const metadata: Metadata = { title: "Retailer" };
 
 export default async function RetailerPage({ params }: { params: Promise<{ id: string }> }) {
+  if (await isLiveOrg()) return <NotConnected title="Retailer" />;
   const { id } = await params;
   const r = await getRetailer(id);
   if (!r) notFound();

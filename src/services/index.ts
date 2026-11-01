@@ -3,6 +3,7 @@
 import * as m from "@/mocks/data";
 import { authRequired } from "@/lib/auth/mode";
 import { ROLE_LABEL } from "@/lib/auth/roles";
+import { isLiveOrg } from "@/lib/auth/access";
 import { getAuthUser } from "@/lib/auth/session";
 import { CONTENT_SAMPLE_NOTE, contentPacks, contentProducts } from "@/mocks/content-samples";
 import { findProhibitedClaims } from "@/lib/content-agent/claims";
@@ -11,6 +12,7 @@ import { DISCOVERY_NOTE, discoveryCandidates, type DiscoveryCandidate } from "@/
 import { amazonActionFor, buildSuggestions, followUpEmail, scoreCandidate, suggestedReplyFor, temperatureFor, type Suggestion } from "@/lib/agent-logic";
 import { AGENT_NAMES } from "@/lib/agents";
 import { renderDraft } from "@/lib/content-agent/render";
+import { liveCreateTask, liveDecideApproval, liveUpdateTask } from "./live";
 import { readStore, writableStore, type Store } from "./store";
 import type {
   Activity, AgentKey, Approval, AuditEntry, Conversation, Customer, DashboardSummary, Deal, PipelineStage,
@@ -22,12 +24,24 @@ import { addDays, isoDate, renderPostForApproval, sampleMetricsFor, toView } fro
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
+/** Sample records belong to the demo only. A live organisation gets `empty` instead, so sample and real data never mix. */
+async function sampleOr<T>(empty: T, real: () => T | Promise<T>): Promise<T> {
+  return (await isLiveOrg()) ? empty : real();
+}
+
 const RANGE_FACTOR: Record<string, number> = { today: 0.14, "7d": 1, "30d": 4.1, "90d": 11.5, custom: 1 };
 const SCALED = new Set(["b2c", "b2b", "opp", "content"]);
 
 export async function getDashboardSummary(range = "7d"): Promise<DashboardSummary> {
   await tick();
   const store = await readStore();
+  if (await isLiveOrg()) {
+    return {
+      kpis: [], funnel: [], trend: { "7d": [], "30d": [], "90d": [] }, agents: [], enquiries: [], retailers: [], content: [], amazon: [],
+      approvals: store.approvals.filter((a) => a.status === "pending").slice(0, 3),
+      tasks: store.tasks.filter((t) => t.status === "open").slice(0, 4),
+    };
+  }
   const f = RANGE_FACTOR[range] ?? 1;
   return {
     kpis: m.kpis.map((k) =>
@@ -51,17 +65,17 @@ export async function getCurrentUser() {
   const u = await getAuthUser();
   return { name: u?.name ?? "Guest", role: u?.role ? ROLE_LABEL[u.role] : "No role assigned", email: u?.email ?? "" };
 }
-export async function getAgents() { await tick(); return m.agents; }
-export async function getEnquiries() { await tick(); return m.enquiries; }
-export async function getConversations(): Promise<Conversation[]> { await tick(); return m.conversations; }
-export async function getCustomers(): Promise<Customer[]> { await tick(); return m.customers; }
-export async function getCustomer(id: string) { await tick(); return m.customers.find((c) => c.id === id) ?? null; }
+export async function getAgents() { await tick(); return sampleOr([], () => m.agents); }
+export async function getEnquiries() { await tick(); return sampleOr([], () => m.enquiries); }
+export async function getConversations(): Promise<Conversation[]> { await tick(); return sampleOr([], () => m.conversations); }
+export async function getCustomers(): Promise<Customer[]> { await tick(); return sampleOr([], () => m.customers); }
+export async function getCustomer(id: string) { await tick(); return sampleOr(null, () => m.customers.find((c) => c.id === id) ?? null); }
 export async function getRetailers(): Promise<Retailer[]> { await tick(); return (await readStore()).retailers; }
 export async function getRetailer(id: string) { await tick(); return (await readStore()).retailers.find((r) => r.id === id) ?? null; }
-export async function getProducts() { await tick(); return m.products; }
-export async function getContent() { await tick(); return m.contentItems; }
-export async function getBrandRules() { await tick(); return m.brandRules; }
-export async function getNotifications() { await tick(); return m.notifications; }
+export async function getProducts() { await tick(); return sampleOr([], () => m.products); }
+export async function getContent() { await tick(); return sampleOr([], () => m.contentItems); }
+export async function getBrandRules() { await tick(); return sampleOr([], () => m.brandRules); }
+export async function getNotifications() { await tick(); return sampleOr([], () => m.notifications); }
 export async function getActivities(): Promise<Activity[]> { await tick(); return (await readStore()).activity; }
 
 /** Records what an agent or a person did, newest first, so every agent shows up in one shared history. */
@@ -71,11 +85,13 @@ function logActivity(s: Store, entry: Omit<Activity, "id" | "at">) {
 }
 export async function getAmazon() {
   await tick();
-  return { rows: m.amazonRows, competitors: m.amazonCompetitors, reviews: m.amazonReviews, pricing: m.amazonPricing, listings: m.amazonListings };
+  return sampleOr({ rows: [], competitors: [], reviews: [], pricing: [], listings: [] },
+    () => ({ rows: m.amazonRows, competitors: m.amazonCompetitors, reviews: m.amazonReviews, pricing: m.amazonPricing, listings: m.amazonListings }));
 }
 
 export async function getTasks(): Promise<Task[]> { await tick(); return (await readStore()).tasks; }
 export async function createTask(input: Pick<Task, "title" | "due" | "priority" | "assignee">, from?: Pick<Task, "source" | "href">): Promise<Task> {
+  if (await isLiveOrg()) return liveCreateTask(input, from);
   const t: Task = { id: `t${Date.now()}${Math.random().toString(36).slice(2, 6)}`, source: "Manual", status: "open", href: "/tasks", ...input, ...from };
   const s = await writableStore();
   s.tasks.unshift(t);
@@ -83,6 +99,7 @@ export async function createTask(input: Pick<Task, "title" | "due" | "priority" 
   return t;
 }
 export async function updateTask(id: string, patch: Partial<Pick<Task, "status" | "due" | "assignee">>): Promise<Task | null> {
+  if (await isLiveOrg()) return liveUpdateTask(id, patch);
   const t = (await writableStore()).tasks.find((x) => x.id === id);
   if (!t) return null;
   Object.assign(t, patch);
@@ -104,6 +121,7 @@ export async function decideApproval(
   note?: string,
   edits?: { title?: string; preview?: string },
 ): Promise<DecisionResult> {
+  if (await isLiveOrg()) return liveDecideApproval(id, action, note, edits); // actor = the signed-in user, set by the database
   const store = await writableStore();
   const a = store.approvals.find((x) => x.id === id);
   if (!a) return { ok: false, reason: "not_found" };
@@ -122,7 +140,7 @@ export async function decideApproval(
 
 export async function getContentSamples() {
   await tick();
-  return { products: contentProducts, packs: contentPacks, note: CONTENT_SAMPLE_NOTE };
+  return sampleOr({ products: [], packs: [], note: CONTENT_SAMPLE_NOTE }, () => ({ products: contentProducts, packs: contentPacks, note: CONTENT_SAMPLE_NOTE }));
 }
 
 export type SubmitResult =
@@ -244,6 +262,7 @@ export async function moveDeal(id: string, stage: PipelineStage): Promise<Deal |
 }
 
 export async function getReports(): Promise<ReportSection[]> {
+  if (await isLiveOrg()) return []; // the report figures are illustrative samples
   await tick();
   const s = (label: string, seriesTitle: string, vals: number[], metrics: ReportSection["metrics"]): ReportSection => ({
     id: label.toLowerCase().replace(/[^a-z]+/g, "-"),
@@ -264,6 +283,7 @@ export async function getReports(): Promise<ReportSection[]> {
 }
 
 export async function getSearchIndex() {
+  if (await isLiveOrg()) return [];
   return [
     ...m.customers.map((c) => ({ label: c.name, hint: "Customer", href: `/customers/${c.id}` })),
     ...m.retailers.map((r) => ({ label: r.business, hint: "Retailer", href: `/retailers/${r.id}` })),
@@ -324,9 +344,10 @@ export type DiscoveryRow = DiscoveryCandidate & { score: number; temperature: Re
 export async function getDiscovery(): Promise<{ note: string; candidates: DiscoveryRow[] }> {
   await tick();
   const s = await readStore();
+  const live = await isLiveOrg();
   return {
     note: DISCOVERY_NOTE,
-    candidates: discoveryCandidates.map((c) => {
+    candidates: (live ? [] : discoveryCandidates).map((c) => {
       const { score, factors } = scoreCandidate(c.signals);
       return { ...c, score, factors, temperature: temperatureFor(score), added: s.retailers.some((r) => r.id === `r-${c.id}`) };
     }),
@@ -358,7 +379,7 @@ export async function addDiscoveredRetailer(id: string): Promise<AddLeadResult> 
 
 export async function getSuggestions(): Promise<Suggestion[]> {
   const s = await readStore();
-  return buildSuggestions({ tasks: s.tasks, deals: s.deals, retailers: s.retailers, approvals: s.approvals, amazon: m.amazonRows });
+  return buildSuggestions({ tasks: s.tasks, deals: s.deals, retailers: s.retailers, approvals: s.approvals, amazon: (await isLiveOrg()) ? [] : m.amazonRows });
 }
 
 /** Turns a suggestion into a task. The suggestion is rebuilt on the server, so the browser only names it. */
@@ -379,6 +400,7 @@ export interface OrchestratorBrief {
 export async function getOrchestratorBrief(): Promise<OrchestratorBrief> {
   await tick();
   const s = await readStore();
+  if (await isLiveOrg()) return liveBrief(s);
   const pending = (k: AgentKey) => s.approvals.filter((a) => a.status === "pending" && a.generatedBy === k).length;
   const hot = s.retailers.filter((r) => r.temperature === "HOT").length;
   const open = s.tasks.filter((t) => t.status === "open").length;
@@ -397,5 +419,23 @@ export async function getOrchestratorBrief(): Promise<OrchestratorBrief> {
     recommendations: buildSuggestions({ tasks: s.tasks, deals: s.deals, retailers: s.retailers, approvals: s.approvals, amazon: m.amazonRows }).slice(0, 5),
     feed: s.activity.slice(0, 8),
     totals: { pending: s.approvals.filter((a) => a.status === "pending").length, openTasks: open, hotLeads: hot },
+  };
+}
+
+/** What the orchestrator can honestly say for a live organisation: approvals and tasks come from the database, and
+ *  every other agent says it is not connected yet instead of quoting sample numbers. */
+function liveBrief(s: Store): OrchestratorBrief {
+  const pending = (k: AgentKey) => s.approvals.filter((a) => a.status === "pending" && a.generatedBy === k).length;
+  const open = s.tasks.filter((t) => t.status === "open").length;
+  const hrefs: Record<AgentKey, string> = { b2c: "/b2c", b2b: "/b2b", amazon: "/amazon", content: "/content", crm: "/tasks" };
+  const agents = (Object.keys(hrefs) as AgentKey[]).map((key) => ({
+    key, name: AGENT_NAMES[key], href: hrefs[key], pending: pending(key),
+    headline: key === "crm" ? `${open} open task${open === 1 ? "" : "s"}` : "Not connected to the database yet",
+  }));
+  return {
+    agents,
+    recommendations: buildSuggestions({ tasks: s.tasks, deals: s.deals, retailers: s.retailers, approvals: s.approvals, amazon: [] }).slice(0, 5),
+    feed: s.activity.slice(0, 8),
+    totals: { pending: s.approvals.filter((a) => a.status === "pending").length, openTasks: open, hotLeads: 0 },
   };
 }

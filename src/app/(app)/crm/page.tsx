@@ -1,3 +1,5 @@
+import { isLiveOrg } from "@/lib/auth/access";
+import { NotConnected } from "@/components/not-connected";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getActivities, getConversations, getCustomers, getDeals, getRetailers, getSuggestions, getTasks } from "@/services";
@@ -11,6 +13,7 @@ export const metadata: Metadata = { title: "CRM & Sales Ops" };
 const TABS = ["overview", "customers", "leads", "retailers", "conversations", "pipeline", "tasks", "activities"].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) }));
 
 export default async function CrmPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+  if (await isLiveOrg()) return <NotConnected title="CRM & Sales Ops" />;
   const { tab = "overview" } = await searchParams;
 
   return (

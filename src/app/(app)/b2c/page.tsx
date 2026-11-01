@@ -1,3 +1,5 @@
+import { isLiveOrg } from "@/lib/auth/access";
+import { NotConnected } from "@/components/not-connected";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getActionLinks, getConversations } from "@/services";
@@ -16,6 +18,7 @@ const OPTIONS = [
 ];
 
 export default async function B2CPage({ searchParams }: { searchParams: Promise<{ status?: string; c?: string }> }) {
+  if (await isLiveOrg()) return <NotConnected title="B2C Sales" />;
   const { status = "all", c } = await searchParams;
   const [all, links] = await Promise.all([getConversations(), getActionLinks()]);
   const rows = status === "all" ? all : all.filter((e) => e.status === status);

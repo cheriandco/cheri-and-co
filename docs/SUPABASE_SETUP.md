@@ -33,15 +33,33 @@ executed and tested in an in-process Postgres (`tests/rls.test.ts`); the sign-in
    Set Site URL to the real site address, and add redirect URLs only for addresses you control.
 3. Apply the migration (SQL editor: paste the file and run, or `supabase db push` linked to this project only).
    Check the Security Advisor shows no "RLS disabled" warnings.
-4. Create the demo organisation and the first user (SQL editor, as administrator):
-   ```sql
-   insert into public.organizations (name, is_demo) values ('Cheri & Co. (demo workspace)', true) returning id;
-   -- Authentication > Users > Add user (invite). Then:
-   insert into public.memberships (org_id, user_id, role) values ('<org id>', '<auth user id>', 'owner');
-   ```
+4. Invite the first user and create their organisation: follow "Invite the first user" below.
 5. Set `AUTH_MODE=required` plus the two public variables locally, run `npm run dev`, sign in, and confirm that a user
    with no membership sees "No workspace available yet".
 6. Only then set the same variables in Vercel (not done here; deployment settings were not touched).
+
+## Invite the first user (needs the owner's approval; nothing here has been done)
+Live data is shown to members of an organisation with `is_demo = false`. Members of an `is_demo = true` organisation see
+the built-in sample data instead. Do these in the dashboard / SQL editor as the project owner:
+1. Authentication > Users > **Add user > Create new user**: enter their email and a strong password and tick **Auto Confirm User**.
+   Give them the password privately. (Do not use "Invite user" yet: the app has no set-password page, so an invite link
+   would have nowhere to land. Sign-ups stay off.)
+2. SQL editor, once:
+   ```sql
+   insert into public.organizations (name, is_demo) values ('Cheri & Co.', false) returning id;
+   insert into public.memberships (org_id, user_id, role)
+     select '<org id from above>', id, 'owner' from auth.users where email = '<their email>';
+   ```
+3. In `.env.local` set `AUTH_MODE=required`, run `npm run dev`, sign in at `/login`. You should land on a dashboard that shows
+   only Approvals, Tasks and the orchestrator summary; every other page says "Not connected yet".
+4. Create a task, then check it with `select title, org_id from public.tasks;`.
+Optionally add a second organisation `('Cheri & Co. (sample demo)', true)` and a second membership to see the sample data.
+
+## What is connected to the database (this slice)
+Tasks, Approvals (decisions go through `decide_approval()`), Audit log, Agent activity, and the dashboard and orchestrator
+counts built from them. Not connected yet: customers, retailers, leads, products, orders, content items, and the agents'
+own inputs (B2C conversations, Amazon data, B2B discovery). For a live organisation these show "Not connected yet" or empty,
+never sample data.
 
 ## Known limitations
 - Agent data is still sample data in server memory; this work does not store business data yet.

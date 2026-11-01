@@ -1,3 +1,5 @@
+import { isLiveOrg } from "@/lib/auth/access";
+import { NotConnected } from "@/components/not-connected";
 import type { Metadata } from "next";
 import { getProducts } from "@/services";
 import { PageHeader, DashboardCard, DataTable, Money, StatusBadge } from "@/components/ui";
@@ -5,6 +7,7 @@ import { PageHeader, DashboardCard, DataTable, Money, StatusBadge } from "@/comp
 export const metadata: Metadata = { title: "Products" };
 
 export default async function ProductsPage() {
+  if (await isLiveOrg()) return <NotConnected title="Products" />;
   const products = await getProducts();
   return (
     <div className="stack">

@@ -11,18 +11,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const required = authRequired();
   if (required) {
     // The proxy already redirects signed-out visitors; this re-checks on the server and handles accounts that are
-    // signed in but may not see this workspace's data (no membership, or an organisation without a data source).
+    // signed in but have no organisation membership yet.
     const auth = await getAuthUser();
     if (!auth) redirect("/login");
-    if (!auth.role || !auth.isDemoOrg) {
+    if (!auth.role) {
       return (
         <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 16 }}>
           <div className="card" style={{ width: "100%", maxWidth: 420 }}>
             <h1 style={{ fontSize: 20, marginBottom: 6 }}>No workspace available yet</h1>
             <p className="muted" style={{ fontSize: 13, marginBottom: 16 }}>
-              {auth.role
-                ? "Your organisation's live data is not connected yet, so there is nothing to show."
-                : "Your account is not a member of any organisation. Ask the administrator to add you."}
+              Your account is not a member of any organisation. Ask the administrator to add you.
             </p>
             <form action={signOutAction}><button className="btn" type="submit">Sign out</button></form>
           </div>

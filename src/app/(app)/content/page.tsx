@@ -1,3 +1,5 @@
+import { isLiveOrg } from "@/lib/auth/access";
+import { NotConnected } from "@/components/not-connected";
 import type { Metadata } from "next";
 import { ChevronRight } from "lucide-react";
 import { getApprovals, getBrandRules, getContent, getContentSamples, getProducts, getSocialPosts } from "@/services";
@@ -19,6 +21,7 @@ const TABS = [
 const WORKFLOW = ["Product Library", "Brand Brain", "Content Strategy", "Content Calendar", "Claude Creative Brain (planned)", "Creative Generation", "Canva Design (brief only)", "Human Approval", "Manual Publish (not automated)", "Performance"];
 
 export default async function ContentPage({ searchParams }: { searchParams: Promise<{ tab?: string; edit?: string }> }) {
+  if (await isLiveOrg()) return <NotConnected title="Content & Marketing" />;
   const { tab = "overview", edit } = await searchParams;
   const [content, rules, products, approvals, samples, social] = await Promise.all([getContent(), getBrandRules(), getProducts(), getApprovals(), getContentSamples(), getSocialPosts()]);
   const today = new Date();

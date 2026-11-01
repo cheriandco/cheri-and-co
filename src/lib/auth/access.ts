@@ -12,16 +12,20 @@ export class AuthError extends Error {
   }
 }
 
-/** Throws AuthError unless the caller is signed in, holds the permission, and belongs to an organisation that may see
- *  the built-in sample data. (Until tenant data is moved into Supabase, the sample data is the only dataset and it is
- *  visible only to members of an organisation flagged is_demo; every other organisation is denied.) */
+/** Throws AuthError unless the caller is signed in, holds the permission, and belongs to an organisation. */
 export async function requireAccess(permission: Permission): Promise<AuthUser> {
   const user = await getAuthUser();
   if (!user) throw new AuthError(401, "Authentication required");
-  if (!can(user.role, permission)) throw new AuthError(403, "You do not have permission to do this");
-  if (!user.isDemoOrg) throw new AuthError(403, "This organisation has no data source yet");
+  if (!can(user.role, permission) || !user.orgId) throw new AuthError(403, "You do not have permission to do this");
   return user;
 }
+
+/** A "live" organisation is a real one (not flagged is_demo) in sign-in mode. Its data comes from the database and it
+ *  must never see the built-in sample data. Demo organisations and the public demo use the sample data instead. */
+export const isLive = (user: AuthUser | null): boolean =>
+  authRequired() && !!user && !!user.role && !!user.orgId && !user.isDemoOrg;
+
+export async function isLiveOrg(): Promise<boolean> { return isLive(await getAuthUser()); }
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 

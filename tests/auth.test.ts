@@ -77,10 +77,10 @@ describe("required mode: who gets in", () => {
     signIn(member("approver"));
     await expect(requireAccess("approvals:decide")).resolves.toBeTruthy();
   });
-  it("an organisation that is not the demo organisation never sees the sample data", async () => {
+  it("a live organisation passes access checks and reads its own data, not the sample store", async () => {
     signIn(member("owner", false));
-    await expect(requireAccess("data:read")).rejects.toMatchObject({ status: 403 });
-    await expect(readStore()).rejects.toBeInstanceOf(AuthError);
+    await expect(requireAccess("data:read")).resolves.toBeTruthy();
+    expect((await readStore()).retailers).toEqual([]); // empty, never the 6 sample retailers
   });
   it("an unknown role string grants nothing", async () => {
     signIn(member("superadmin"));
