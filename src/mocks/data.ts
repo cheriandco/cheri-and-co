@@ -72,7 +72,7 @@ export const conversations: Conversation[] = enquiries.map((e) => ({
   ...e,
   messages: [
     { id: `${e.id}-m1`, from: "customer", text: e.message, time: e.time },
-    { id: `${e.id}-m2`, from: e.handler === "Human" ? "human" : "ai", text: e.status === "new" ? "Draft ready: “Yes — Aurelia is available in 18k gold-tone and rose gold-tone. I’ll send you the link.”" : "Thank you for reaching out! Here are the details and a link to purchase.", time: "just now" },
+    { id: `${e.id}-m2`, from: e.handler === "Human" ? "human" : "ai", text: e.status === "new" ? "Draft ready: “Yes — Aurelia is available in the gold-tone and rose gold-tone finishes. I’ll send you the link.”" : "Thank you for reaching out! Here are the details and a link to purchase.", time: "just now" },
   ],
 }));
 
