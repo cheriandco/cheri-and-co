@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   BarChart3, Bell, Building2, CheckCircle2, ChevronDown, ClipboardList, Gem, LayoutDashboard,
-  LogOut, Megaphone, Menu, MessageCircleHeart, Search, Settings, ShoppingBag, Store, Users, UsersRound, X,
+  Megaphone, Menu, MessageCircleHeart, Search, Settings, ShoppingBag, Store, Users, UsersRound, X,
 } from "lucide-react";
 import { Avatar } from "./ui";
 import type { AppNotification, User } from "@/types";
@@ -70,7 +70,6 @@ export function AppShell({ user, notifications, searchIndex, pending, children }
           <Avatar name={user.name} />
           <div className="who"><b>{user.name}</b><span>{user.role}</span></div>
           <button aria-label="Account menu" title="Account menu"><ChevronDown size={16} /></button>
-          <button aria-label="Sign out" title="Sign out"><LogOut size={16} /></button>
         </div>
       </aside>
       {open && <div className="scrim" onClick={() => setOpen(false)} aria-hidden />}

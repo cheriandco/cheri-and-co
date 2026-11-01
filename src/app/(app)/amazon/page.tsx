@@ -104,7 +104,7 @@ export default async function AmazonPage({ searchParams }: { searchParams: Promi
             { header: "Product", primary: true, cell: (r) => <>{r.product}<small>{r.asin}</small></> },
             { header: "Title quality", cell: (r) => <Score value={r.titleScore} /> },
             { header: "Image quality", cell: (r) => <Score value={r.imageScore} /> },
-            { header: "Status", cell: (r) => <StatusBadge status={r.status} label={r.status === "draft" ? "Draft" : undefined} /> },
+            { header: "Status", cell: (r) => <StatusBadge status={r.status} label={r.status === "draft" ? "Draft" : r.status === "live" ? "Sample listing" : undefined} /> },
           ]} />
         </DashboardCard>
       )}
