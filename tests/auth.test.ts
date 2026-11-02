@@ -16,7 +16,7 @@ vi.mock("@/lib/supabase/server", () => ({
       const data = table === "memberships" ? f.rows : [];
       const query: Record<string, unknown> = {
         select: () => query, eq: () => query, not: () => query, in: () => query, order: () => query,
-        limit: () => query, maybeSingle: () => query,
+        limit: () => query, range: () => query, maybeSingle: () => query,
         then: (resolve: (v: { data: unknown; error: null }) => void) => resolve({ data, error: null }),
       };
       return query;

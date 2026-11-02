@@ -37,10 +37,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ resource: stri
   const body = await readJson(req);
   const title = str(body?.title, 200);
   const due = str(body?.due, 60) ?? "Unscheduled";
-  const assignee = str(body?.assignee, 60) ?? "Anika";
+  const assignee = str(body?.assignee, 60) ?? "Anika"; // the sample demo's founder; a live organisation does not store assignees yet, so this is ignored there
   const priority = body?.priority ?? "medium";
   if (!title || !isPriority(priority)) return NextResponse.json({ error: "Invalid task" }, { status: 400 });
-  return NextResponse.json(await s.createTask({ title, due, assignee, priority }), { status: 201 });
+  try { return NextResponse.json(await s.createTask({ title, due, assignee, priority }), { status: 201 }); } catch (e) { return errorResponse(e); }
 }
 
 /** Customers, retailers, products and orders can be created only in a live organisation (the sample demo is read-only here, so it 404s as before).

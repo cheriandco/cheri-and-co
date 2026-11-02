@@ -92,7 +92,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
       <section>
         <SectionHeader title="Tasks & follow-ups" href="/tasks" />
-        <TaskList initial={d.tasks} />
+        <TaskList initial={d.tasks} live={live} />
       </section>
     </div>
   );

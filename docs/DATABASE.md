@@ -1,8 +1,11 @@
 # DATABASE.md — Data model source of truth (draft for review)
 
-**Status: DRAFT. No database exists.** Nothing in this repository is connected to Supabase or any database.
-This document describes what is implemented today and what is still undecided. It is **not** an approved schema.
-Do not create tables from this document until the open questions below are answered by the client.
+**Status: DRAFT.** Update (feature branch `feature/supabase-foundation`, not on `main`): a Supabase schema now exists in
+`supabase/migrations/20261101000000_foundation.sql` (13 tables: `organizations`, `profiles`, `memberships`, `customers`, `products`, `retailers`,
+`leads`, `orders`, `tasks`, `approvals`, `content_items`, `agent_activity`, `audit_log`, all with Row Level Security) and a real (non-demo)
+organisation reads and writes them when `AUTH_MODE=required`. That schema is described in `docs/SUPABASE_SETUP.md`. There are **no tables** for conversations, messages or
+Amazon data (B2C Sales and Amazon Intelligence have no live data source). The rest of this document describes the **sample data layer** (in-memory, the public demo and demo
+organisations) and what is still undecided. It is **not** an approved schema; do not add tables from it until the open questions below are answered by the client.
 
 Legend used throughout `docs/DATABASE.md`, `docs/API.md` and `docs/UX_FLOWS.md`:
 

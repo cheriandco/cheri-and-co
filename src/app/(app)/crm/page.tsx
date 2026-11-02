@@ -23,7 +23,7 @@ export default async function CrmPage({ searchParams }: { searchParams: Promise<
       {(tab === "leads" || tab === "retailers") && <DashboardCard flush><RetailerTable rows={await getRetailers()} /></DashboardCard>}
       {tab === "conversations" && <DashboardCard><ConversationList items={await getConversations()} /></DashboardCard>}
       {tab === "pipeline" && <PipelineBoard initial={await getDeals()} />}
-      {tab === "tasks" && <TaskList initial={await getTasks()} />}
+      {tab === "tasks" && <TaskList initial={await getTasks()} live={await isLiveOrg()} />}
       {tab === "activities" && <DashboardCard><ActivityTimeline items={await getActivities()} /></DashboardCard>}
     </div>
   );

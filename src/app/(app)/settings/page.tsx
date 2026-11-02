@@ -6,9 +6,10 @@ import { PageHeader, DashboardCard, SectionHeader, StatusBadge } from "@/compone
 
 export const metadata: Metadata = { title: "Settings" };
 
-/** Honest status: the database holds accounts and the schema only; every agent still reads sample data. */
+/** Honest status. A real (non-demo) organisation reads its own tasks, approvals, customers, retailers, leads, products, content posts and orders from the database;
+ *  B2C Sales and Amazon Intelligence have no data source yet; sample data is shown only to demo organisations. */
 function supabaseStatus(): string {
-  if (authRequired()) return "Sign-in and organisation access active. Agent data is still SAMPLE data, not read from the database yet";
+  if (authRequired()) return "Sign-in and organisation access active. A real organisation's tasks, approvals, customers, retailers, leads, products, content posts and orders come from the database; B2C Sales and Amazon Intelligence are not connected yet. Sample data is shown only to demo organisations";
   if (isSupabaseConfigured()) return "Configured, but sign-in is off (demo mode). Agent data is SAMPLE data";
   return "Not connected — mock data active";
 }
@@ -36,7 +37,7 @@ export default async function SettingsPage() {
         </DashboardCard>
         <DashboardCard>
           <SectionHeader title="AI agents" />
-          <p className="muted" style={{ marginBottom: 10 }}>Five agents report to the AI Business Orchestrator, a coordination layer. Agent statuses shown here are simulated sample data; no live agent is running.</p>
+          <p className="muted" style={{ marginBottom: 10 }}>Five agents report to the AI Business Orchestrator, a coordination layer. Any agent status listed here is simulated sample data; no agent runs as a live service.</p>
           <div className="list">{agents.map((a) => <div className="list-item" key={a.key}><div className="body"><div className="title">{a.name}</div></div><StatusBadge status={a.status} /></div>)}</div>
         </DashboardCard>
       </div>

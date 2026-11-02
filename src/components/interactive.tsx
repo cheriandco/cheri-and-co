@@ -138,7 +138,8 @@ export function ApprovalQueue({ initial, compact }: { initial: Approval[]; compa
 
 const ASSIGNEES = ["Anika", "Dev", "Meera"];
 
-export function TaskList({ initial }: { initial: Task[] }) {
+/** `live`: a real organisation's tasks. Assignees are not stored yet, so the demo's name picker is replaced by plain text rather than offering a change that would not be saved. */
+export function TaskList({ initial, live = false }: { initial: Task[]; live?: boolean }) {
   const [tasks, setTasks] = useState(initial);
   const toast = useToast();
 
@@ -163,9 +164,11 @@ export function TaskList({ initial }: { initial: Task[] }) {
                 <td data-label="Due">{t.due}</td>
                 <td data-label="Priority"><StatusBadge status={t.priority} /></td>
                 <td data-label="Assignee">
-                  <select aria-label={`Reassign “${t.title}”`} value={t.assignee} onChange={(e) => update(t.id, { assignee: e.target.value }, `Reassigned to ${e.target.value}`)} style={{ font: "inherit", border: 0, background: "transparent" }}>
-                    {ASSIGNEES.map((a) => <option key={a}>{a}</option>)}
-                  </select>
+                  {live ? t.assignee : (
+                    <select aria-label={`Reassign “${t.title}”`} value={t.assignee} onChange={(e) => update(t.id, { assignee: e.target.value }, `Reassigned to ${e.target.value}`)} style={{ font: "inherit", border: 0, background: "transparent" }}>
+                      {ASSIGNEES.map((a) => <option key={a}>{a}</option>)}
+                    </select>
+                  )}
                 </td>
                 <td data-label="Status"><StatusBadge status={t.status} /></td>
                 <td>

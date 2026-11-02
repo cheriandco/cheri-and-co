@@ -45,13 +45,17 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const status = body.status;
     if (status !== undefined && status !== "open" && status !== "done" && status !== "postponed")
       return NextResponse.json({ error: "Invalid status" }, { status: 400 });
-    const task = await s.updateTask(id, { status, due: str(body.due, 60) ?? undefined, assignee: str(body.assignee, 60) ?? undefined });
-    return task ? NextResponse.json(task) : NextResponse.json({ error: "Not found" }, { status: 404 });
+    try {
+      const task = await s.updateTask(id, { status, due: str(body.due, 60) ?? undefined, assignee: str(body.assignee, 60) ?? undefined });
+      return task ? NextResponse.json(task) : NextResponse.json({ error: "Not found" }, { status: 404 });
+    } catch (e) { return errorResponse(e); }
   }
   if (resource === "pipeline" || resource === "leads") {
     if (!isStage(body.stage)) return NextResponse.json({ error: "Invalid stage" }, { status: 400 });
-    const deal = await s.moveDeal(id, body.stage);
-    return deal ? NextResponse.json(deal) : NextResponse.json({ error: "Not found" }, { status: 404 });
+    try {
+      const deal = await s.moveDeal(id, body.stage);
+      return deal ? NextResponse.json(deal) : NextResponse.json({ error: "Not found" }, { status: 404 });
+    } catch (e) { return errorResponse(e); }
   }
   return NextResponse.json({ error: "Not found" }, { status: 404 });
 }

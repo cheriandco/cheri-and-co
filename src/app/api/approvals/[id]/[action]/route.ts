@@ -1,4 +1,4 @@
-import { currentActor, deny } from "@/lib/auth/access";
+import { currentActor, deny, errorResponse } from "@/lib/auth/access";
 import { NextResponse } from "next/server";
 import { decideApproval } from "@/services";
 import { readJson, str } from "@/lib/validate";
@@ -17,7 +17,8 @@ export async function POST(req: Request, ctx: Ctx) {
   const note = str(body?.note, 500) ?? undefined;
   const edits = action === "edit" ? { title: str(body?.title, 200) ?? undefined, preview: str(body?.preview, MAX_PREVIEW_LENGTH) ?? undefined } : undefined;
   if (action === "edit" && !edits?.title && !edits?.preview) return NextResponse.json({ error: "Nothing to edit" }, { status: 400 });
-  const res = await decideApproval(id, action, await currentActor(), note, edits); // never taken from the request
+  let res;
+  try { res = await decideApproval(id, action, await currentActor(), note, edits); } catch (e) { return errorResponse(e); } // actor never taken from the request
   if (res.ok) return NextResponse.json(res.approval);
   if (res.reason === "not_found") return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (res.reason === "not_pending") return NextResponse.json({ error: "This item has already been decided." }, { status: 409 });

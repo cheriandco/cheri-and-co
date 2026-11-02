@@ -1,8 +1,8 @@
 # API.md — HTTP API source of truth (draft for review)
 
-**Status: DRAFT.** Describes the routes that exist in `src/app/api` today. All of them serve **mock or in-memory
-data**. There is **no authentication, no authorisation, no rate limiting and no database**. Do not expose this
-server to the public internet in its current form.
+**Status: DRAFT.** Describes the routes that exist in `src/app/api` today. In the default `AUTH_MODE=demo` (the public demo, and `main`) all of them serve **mock or in-memory
+data** with no authentication. On the feature branch with `AUTH_MODE=required`, every route needs a verified session, a role permission and a membership, and a real
+(non-demo) organisation is served from its own database rows: see section 7. Do not run the default demo mode with real client data.
 
 See `docs/DATABASE.md` for the legend (confirmed / requested / assumption / open question).
 
@@ -122,3 +122,11 @@ Demo only. Every call works on the visitor's private in-memory copy. Nothing is 
 ## 6. Dependencies
 Authentication and database decisions (`docs/DATABASE.md`); a staging environment; client-owned accounts for any integration.
 Security note: the Next.js version is 16.4.1 (patched for GHSA-673q-mjm6-r5xr, GHSA-2464-fhr4-w9xw, GHSA-p3m5-59mp-jv5r).
+
+## 7. Behaviour in `AUTH_MODE=required` (feature branch)
+- **Order of checks:** session (401) then role permission and membership (403) then, for writes, same-origin JSON (403) then input validation (400). The organisation always comes from the verified session, never from the request.
+- **Database refusals:** when Row Level Security refuses a write, every write route answers **403** (previously the older routes for tasks, pipeline and approvals answered 500). A clash such as a duplicate SKU or a foreign key to another organisation answers **409**. Any other database failure is a 500.
+- **Complete lists:** collection reads fetch every row in pages of 1000, so a response is never silently cut at the API's row limit. A single list above 10,000 rows returns an error rather than an incomplete list. The agent activity feed is intentionally the latest 50 entries only.
+- **Tasks:** `PATCH /api/tasks/:id` with `assignee` answers **409** for a real organisation (assignees are not stored yet). `due: "Postponed +1 day"` with `status: "postponed"` moves the stored due date one day later. A new live task has no assignee ("Unassigned"); the `assignee` field in `POST /api/tasks` is used by the demo only.
+- **Content approval:** a post is shown as approved or rejected only when an approval whose meta names that post (`meta.postId`, written at submit) says so. A status or `approval_id` written directly to the table is not believed.
+- **Connected resources:** tasks, approvals, audit, activity, customers, retailers, leads, products, content posts, orders and the Sales report. `GET /api/conversations` and `GET /api/amazon/insights` return empty arrays/objects for a real organisation; `POST /api/agents/b2c/run` answers 501; `POST /api/agent-actions` and `POST /api/b2b/discover` answer 404 ("not connected").

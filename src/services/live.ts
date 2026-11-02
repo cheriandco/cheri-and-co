@@ -12,12 +12,33 @@ import type { Activity, AgentKey, Approval, ApprovalStatus, AuditEntry, Customer
 import type { ReportSection } from "@/types";
 import type { SocialPost, SocialPostInput, SocialPostView } from "@/types/social";
 import {
-  NON_PURCHASE_STATUSES, REVENUE_STATUS, SOCIAL_DB_PLATFORMS, salesReport, parseDue, toActivity, toApproval, toAudit, toCustomer, toDeal, toOrder, toProduct, toRetailer, toSocialPost, toTask,
+  NON_PURCHASE_STATUSES, POSTPONE_LABEL, REVENUE_STATUS, SOCIAL_DB_PLATFORMS, salesReport, parseDue, toActivity, toApproval, toAudit, toCustomer, toDeal, toOrder, toProduct, toRetailer, toSocialPost, toTask,
   type ActivityRow, type ApprovalRow, type AuditRow, type ContentRow, type CustomerRow, type LeadRow, type OrderRow, type ProductRow, type RetailerRow, type TaskRow,
 } from "./live-map";
 import type { Store } from "./store";
 
 export class LiveError extends Error {}
+
+/** Rows fetched per request. The API answers with at most its own max-rows setting (1000 by default), so a plain `.limit(5000)` quietly
+ *  returned 1000. Lists are therefore read page by page until they are complete. */
+const PAGE_SIZE = 1000;
+/** A list longer than this is refused with an error instead of being cut short, so a page never shows a quietly incomplete set. */
+export const LIST_CAP = 10_000;
+
+type PageResult = PromiseLike<{ data: unknown; error: { code?: string; message: string } | null }>;
+
+/** Reads every row of a query. `page(from, to)` must order by a unique, stable key so pages neither overlap nor skip. */
+export async function allRows<T>(page: (from: number, to: number) => PageResult, cap = LIST_CAP): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await page(from, from + PAGE_SIZE - 1);
+    if (error) fail(error);
+    const rows = (data ?? []) as T[];
+    out.push(...rows);
+    if (out.length > cap) throw new LiveError("Too many records to list in one view");
+    if (rows.length < PAGE_SIZE) return out;
+  }
+}
 
 async function ctx() {
   const user = await getAuthUser();
@@ -44,10 +65,8 @@ async function names(supabase: Awaited<ReturnType<typeof ctx>>["supabase"], ids:
 
 export async function liveTasks(): Promise<Task[]> {
   const { supabase, orgId } = await ctx();
-  const { data, error } = await supabase.from("tasks").select("id, title, source, due_at, priority, status, assignee_id, related_ref")
-    .eq("org_id", orgId).order("created_at", { ascending: false }).limit(200);
-  if (error) fail(error);
-  const rows = (data ?? []) as TaskRow[];
+  const rows = await allRows<TaskRow>((from, to) => supabase.from("tasks").select("id, title, source, due_at, priority, status, assignee_id, related_ref")
+    .eq("org_id", orgId).order("created_at", { ascending: false }).order("id").range(from, to));
   const n = await names(supabase, rows.map((r) => r.assignee_id));
   return rows.map((r) => toTask(r, n));
 }
@@ -63,11 +82,20 @@ export async function liveCreateTask(input: Pick<Task, "title" | "due" | "priori
   return toTask(data as TaskRow, new Map());
 }
 
-export async function liveUpdateTask(id: string, patch: Partial<Pick<Task, "status" | "due">>): Promise<Task | null> {
+export async function liveUpdateTask(id: string, patch: Partial<Pick<Task, "status" | "due" | "assignee">>): Promise<Task | null> {
+  // The table stores a person's id, and the app has no way to pick a person yet, so say so instead of pretending the change was saved.
+  if (patch.assignee !== undefined) throw new ConflictError("Assigning tasks to people is not available yet");
   const { supabase, orgId } = await ctx();
   const change: Record<string, unknown> = {};
   if (patch.status) change.status = patch.status;
-  if (patch.due !== undefined) change.due_at = parseDue(patch.due);
+  if (patch.due === POSTPONE_LABEL) {
+    // "Postpone" means one day later than the current due date (or tomorrow when there is none), not "no due date".
+    const { data: cur, error: curError } = await supabase.from("tasks").select("due_at").eq("org_id", orgId).eq("id", id).maybeSingle();
+    if (curError) fail(curError);
+    if (!cur) return null;
+    const base = (cur as { due_at: string | null }).due_at ? new Date((cur as { due_at: string }).due_at) : new Date();
+    change.due_at = new Date(base.getTime() + 86_400_000).toISOString();
+  } else if (patch.due !== undefined) change.due_at = parseDue(patch.due);
   if (!Object.keys(change).length) return null;
   const { data, error } = await supabase.from("tasks").update(change).eq("org_id", orgId).eq("id", id)
     .select("id, title, source, due_at, priority, status, assignee_id, related_ref");
@@ -78,10 +106,9 @@ export async function liveUpdateTask(id: string, patch: Partial<Pick<Task, "stat
 
 export async function liveApprovals(): Promise<Approval[]> {
   const { supabase, orgId } = await ctx();
-  const { data, error } = await supabase.from("approvals").select("id, title, type, generated_by, status, preview, meta, created_at")
-    .eq("org_id", orgId).order("created_at", { ascending: false }).limit(200);
-  if (error) fail(error);
-  return ((data ?? []) as ApprovalRow[]).map((r) => toApproval(r));
+  const rows = await allRows<ApprovalRow>((from, to) => supabase.from("approvals").select("id, title, type, generated_by, status, preview, meta, created_at")
+    .eq("org_id", orgId).order("created_at", { ascending: false }).order("id").range(from, to));
+  return rows.map((r) => toApproval(r));
 }
 
 export type LiveDecision =
@@ -120,10 +147,8 @@ async function syncContentStatus(supabase: Awaited<ReturnType<typeof ctx>>["supa
 
 export async function liveAudit(): Promise<AuditEntry[]> {
   const { supabase, orgId } = await ctx();
-  const { data, error } = await supabase.from("audit_log").select("id, approval_id, action, actor_id, note, at")
-    .eq("org_id", orgId).order("at", { ascending: false }).limit(200);
-  if (error) fail(error);
-  const rows = ((data ?? []) as AuditRow[]).reverse(); // oldest first, like the sample store: the Approvals page reverses it
+  const rows = (await allRows<AuditRow>((from, to) => supabase.from("audit_log").select("id, approval_id, action, actor_id, note, at")
+    .eq("org_id", orgId).order("at", { ascending: false }).order("id", { ascending: false }).range(from, to))).reverse(); // oldest first, like the sample store: the Approvals page reverses it
   const n = await names(supabase, rows.map((r) => r.actor_id));
   return rows.map((r) => toAudit(r, n));
 }
@@ -162,19 +187,19 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** A customer's purchases are their orders other than cancelled and returned ones (see NON_PURCHASE_STATUSES). */
 async function purchaseCounts(supabase: Awaited<ReturnType<typeof ctx>>["supabase"], orgId: string): Promise<Map<string, number>> {
-  const { data } = await supabase.from("orders").select("customer_id").eq("org_id", orgId).not("customer_id", "is", null)
-    .not("status", "in", `(${NON_PURCHASE_STATUSES.join(",")})`).limit(5000);
+  const orders = await allRows<{ customer_id: string }>((from, to) => supabase.from("orders").select("customer_id").eq("org_id", orgId).not("customer_id", "is", null)
+    .not("status", "in", `(${NON_PURCHASE_STATUSES.join(",")})`).order("id").range(from, to));
   const out = new Map<string, number>();
-  for (const o of (data ?? []) as { customer_id: string }[]) out.set(o.customer_id, (out.get(o.customer_id) ?? 0) + 1);
+  for (const o of orders) out.set(o.customer_id, (out.get(o.customer_id) ?? 0) + 1);
   return out;
 }
 
 export async function liveCustomers(): Promise<Customer[]> {
   const { supabase, orgId } = await ctx();
-  const { data, error } = await supabase.from("customers").select(CUSTOMER_COLS).eq("org_id", orgId).order("created_at", { ascending: false }).limit(500);
-  if (error) fail(error);
+  const rows = await allRows<CustomerRow>((from, to) => supabase.from("customers").select(CUSTOMER_COLS).eq("org_id", orgId)
+    .order("created_at", { ascending: false }).order("id").range(from, to));
   const counts = await purchaseCounts(supabase, orgId);
-  return ((data ?? []) as CustomerRow[]).map((r) => toCustomer(r, counts.get(r.id) ?? 0));
+  return rows.map((r) => toCustomer(r, counts.get(r.id) ?? 0));
 }
 
 export async function liveCustomer(id: string): Promise<Customer | null> {
@@ -198,14 +223,10 @@ export async function liveCreateCustomer(input: CustomerInput): Promise<Customer
 /** Retailers with their lead. A retailer without a lead row shows as a new, unscored retailer. */
 export async function liveRetailersAndDeals(): Promise<{ retailers: Retailer[]; deals: Deal[] }> {
   const { supabase, orgId } = await ctx();
-  const [r, l] = await Promise.all([
-    supabase.from("retailers").select(RETAILER_COLS).eq("org_id", orgId).order("created_at", { ascending: false }).limit(500),
-    supabase.from("leads").select(LEAD_COLS).eq("org_id", orgId).order("last_activity_at", { ascending: false }).limit(500),
+  const [retailers, leads] = await Promise.all([
+    allRows<RetailerRow>((from, to) => supabase.from("retailers").select(RETAILER_COLS).eq("org_id", orgId).order("created_at", { ascending: false }).order("id").range(from, to)),
+    allRows<LeadRow>((from, to) => supabase.from("leads").select(LEAD_COLS).eq("org_id", orgId).order("last_activity_at", { ascending: false }).order("id").range(from, to)),
   ]);
-  if (r.error) fail(r.error);
-  if (l.error) fail(l.error);
-  const retailers = (r.data ?? []) as RetailerRow[];
-  const leads = (l.data ?? []) as LeadRow[];
   const byRetailer = new Map<string, LeadRow>(); // leads are newest first, so the first one seen per retailer is the latest
   for (const lead of leads) if (!byRetailer.has(lead.retailer_id)) byRetailer.set(lead.retailer_id, lead);
   const rows = new Map(retailers.map((x) => [x.id, x]));
@@ -251,9 +272,9 @@ const isDuplicate = (error: { code?: string; message: string }) => error.code ==
 
 export async function liveProducts(): Promise<Product[]> {
   const { supabase, orgId } = await ctx();
-  const { data, error } = await supabase.from("products").select(PRODUCT_COLS).eq("org_id", orgId).order("created_at", { ascending: false }).limit(500);
-  if (error) fail(error);
-  return ((data ?? []) as ProductRow[]).map(toProduct);
+  const rows = await allRows<ProductRow>((from, to) => supabase.from("products").select(PRODUCT_COLS).eq("org_id", orgId)
+    .order("created_at", { ascending: false }).order("id").range(from, to));
+  return rows.map(toProduct);
 }
 
 export async function liveProduct(id: string): Promise<Product | null> {
@@ -294,24 +315,34 @@ export async function liveUpdateProduct(id: string, input: ProductInput): Promis
 const CONTENT_COLS = "id, platform, title, topic, caption, hashtags, creative_brief, image_direction, scheduled_for, status, approval_id, created_at";
 
 /** A post's status follows its approval; the content_items.status column is kept in step but is only the fallback. */
-async function approvalStatuses(supabase: Awaited<ReturnType<typeof ctx>>["supabase"], orgId: string, rows: ContentRow[]): Promise<Map<string, ApprovalStatus>> {
+/** An approval and the post it was raised for. `postId` is written into the approval's meta at submit time. */
+type ApprovalLink = { status: ApprovalStatus; postId?: string };
+
+async function approvalStatuses(supabase: Awaited<ReturnType<typeof ctx>>["supabase"], orgId: string, rows: ContentRow[]): Promise<Map<string, ApprovalLink>> {
   const ids = [...new Set(rows.map((r) => r.approval_id).filter((x): x is string => !!x))];
-  const out = new Map<string, ApprovalStatus>();
+  const out = new Map<string, ApprovalLink>();
   if (!ids.length) return out;
-  const { data } = await supabase.from("approvals").select("id, status").eq("org_id", orgId).in("id", ids);
-  for (const a of (data ?? []) as { id: string; status: ApprovalStatus }[]) out.set(a.id, a.status);
+  const { data, error } = await supabase.from("approvals").select("id, status, meta").eq("org_id", orgId).in("id", ids);
+  if (error) fail(error); // an unreadable approval must not leave a post looking approved
+  for (const a of (data ?? []) as { id: string; status: ApprovalStatus; meta: { postId?: unknown } | null }[])
+    out.set(a.id, { status: a.status, postId: typeof a.meta?.postId === "string" ? a.meta.postId : undefined });
   return out;
 }
 
-const viewFor = (r: ContentRow, statuses: Map<string, ApprovalStatus>): SocialPostView =>
-  toView(toSocialPost(r), new Date(), r.approval_id ? statuses.get(r.approval_id) : undefined);
+/** A post counts as approved or rejected only when an approval raised for this very post says so. Writers can update `content_items`
+ *  directly (the table's policy allows it), so the stored status or approval_id alone is never trusted: a post whose status was set by hand,
+ *  or that points at some other item's approval, is shown as a draft. */
+const viewFor = (r: ContentRow, links: Map<string, ApprovalLink>): SocialPostView => {
+  const link = r.approval_id ? links.get(r.approval_id) : undefined;
+  const backed = !!link && link.postId === r.id;
+  const post = toSocialPost(r);
+  return backed ? toView(post, new Date(), link.status) : toView({ ...post, approvalId: undefined, seedStatus: "draft" }, new Date());
+};
 
 export async function liveSocialPosts(): Promise<SocialPostView[]> {
   const { supabase, orgId } = await ctx();
-  const { data, error } = await supabase.from("content_items").select(CONTENT_COLS).eq("org_id", orgId)
-    .in("platform", [...SOCIAL_DB_PLATFORMS]).order("created_at", { ascending: false }).limit(500);
-  if (error) fail(error);
-  const rows = (data ?? []) as ContentRow[];
+  const rows = await allRows<ContentRow>((from, to) => supabase.from("content_items").select(CONTENT_COLS).eq("org_id", orgId)
+    .in("platform", [...SOCIAL_DB_PLATFORMS]).order("created_at", { ascending: false }).order("id").range(from, to));
   const statuses = await approvalStatuses(supabase, orgId, rows);
   return rows.map((r) => viewFor(r, statuses));
 }
@@ -375,7 +406,7 @@ export async function liveSubmitSocialPost(id: string): Promise<LivePostResult> 
   if (!((claim.data ?? []) as unknown[]).length) return { ok: false, reason: "invalid_state", error: "Only drafts can be submitted for approval." };
   const made = await supabase.from("approvals").insert({
     org_id: orgId, title: `${view.title} · ${view.platform} post`, type: "Content", generated_by: "content", status: "pending", preview,
-    meta: { kind: "content_draft", subject: view.title, isSample: false, allowedClaims: [] },
+    meta: { kind: "content_draft", subject: view.title, isSample: false, allowedClaims: [], postId: id },
   }).select("id").single();
   if (made.error || !made.data) {
     await supabase.from("content_items").update({ status: "draft" }).eq("org_id", orgId).eq("id", id); // put it back so it can be retried
@@ -390,7 +421,7 @@ export async function liveSubmitSocialPost(id: string): Promise<LivePostResult> 
     return { ok: false, reason: "not_found", error: "Post not found." };
   }
   await liveLog({ agent: "content", action: `Sent "${view.title}" (${view.platform}) for approval` });
-  return { ok: true, post: viewFor(saved, new Map([[approvalId, "pending" as ApprovalStatus]])) };
+  return { ok: true, post: viewFor(saved, new Map<string, ApprovalLink>([[approvalId, { status: "pending", postId: id }]])) };
 }
 
 /** The approval was created but could not be linked to its post. The database allows no delete or update of approvals, so
@@ -411,9 +442,9 @@ const isForeignKey = (error: { code?: string; message: string }) => error.code =
 
 export async function liveOrders(): Promise<Order[]> {
   const { supabase, orgId } = await ctx();
-  const { data, error } = await supabase.from("orders").select(ORDER_COLS).eq("org_id", orgId).order("ordered_at", { ascending: false }).limit(500);
-  if (error) fail(error);
-  return ((data ?? []) as OrderRow[]).map(toOrder);
+  const rows = await allRows<OrderRow>((from, to) => supabase.from("orders").select(ORDER_COLS).eq("org_id", orgId)
+    .order("ordered_at", { ascending: false }).order("id").range(from, to));
+  return rows.map(toOrder);
 }
 
 export async function liveOrder(id: string): Promise<Order | null> {
@@ -451,16 +482,12 @@ export async function liveUpdateOrderStatus(id: string, status: OrderStatus): Pr
   return toOrder(row);
 }
 
-/** The Sales report: delivered orders only, last twelve weeks (six shown, six for comparison). If the row limit were hit the
- *  figures would be wrong, so that is an error instead of a quietly short total. */
+/** The Sales report: delivered orders only, last twelve weeks (six shown, six for comparison). Every matching row is read page by page;
+ *  beyond LIST_CAP rows that is an error instead of a quietly short total. */
 export async function liveSalesReport(now = new Date()): Promise<ReportSection> {
   const { supabase, orgId } = await ctx();
   const since = new Date(now.getTime() - 12 * 7 * 86_400_000).toISOString();
-  const LIMIT = 10_000;
-  const { data, error } = await supabase.from("orders").select("total, ordered_at").eq("org_id", orgId).eq("status", REVENUE_STATUS)
-    .gte("ordered_at", since).limit(LIMIT);
-  if (error) fail(error);
-  const rows = (data ?? []) as { total: number | string; ordered_at: string }[];
-  if (rows.length >= LIMIT) throw new LiveError("Too many orders to total in one report");
+  const rows = await allRows<{ total: number | string; ordered_at: string }>((from, to) => supabase.from("orders").select("total, ordered_at").eq("org_id", orgId)
+    .eq("status", REVENUE_STATUS).gte("ordered_at", since).order("id").range(from, to));
   return salesReport(rows, now);
 }

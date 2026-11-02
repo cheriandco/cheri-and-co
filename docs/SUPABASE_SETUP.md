@@ -1,8 +1,9 @@
 # Supabase foundation: setup and security
 
-Status: **built and tested locally; not applied to the client's Supabase project.** No Supabase credentials for
-project `ciodkacwdbktuimriuss` were available, so nothing here has run against the hosted service. The SQL was
-executed and tested in an in-process Postgres (`tests/rls.test.ts`); the sign-in code was tested with a fake client.
+Status: **built and tested locally. The foundation migration was applied to project `ciodkacwdbktuimriuss` by the project owner and
+`docs/rls_live_check.sql` passed 95/95 there (reported by the owner; it predates Slices 2 to 4, which changed no schema).** Everything else here
+(real sign-in, the Slice 1 to 4 queries as PostgREST runs them, the approval round trip) has **not** been run against the hosted service. The SQL was
+executed and tested in an in-process Postgres (`tests/rls.test.ts`); the sign-in and data code were tested with a fake client.
 
 ## What exists
 - `supabase/migrations/20261101000000_foundation.sql`: 13 tables, all with Row Level Security, no sample rows.
@@ -10,7 +11,7 @@ executed and tested in an in-process Postgres (`tests/rls.test.ts`); the sign-in
   `approvals`, `content_items`, `agent_activity`, `audit_log`.
 - `AUTH_MODE=demo` (default): the public demo, unchanged. No sign-in, sample data only, nothing stored.
 - `AUTH_MODE=required`: every page and API call needs a verified Supabase session and a row in `memberships`.
-- The agents still read the built-in sample data. Moving each agent onto these tables is a separate piece of work.
+- Real (non-demo) organisations read their own rows for tasks, approvals, customers, retailers, leads, products, content posts and orders (see "What is connected" below). B2C Sales and Amazon Intelligence have no data source yet. The built-in sample data is shown only to demo organisations and the public demo.
 
 ## Security model
 - Tenancy comes from `public.memberships (org_id, user_id, role)`. Policies compare `org_id` with the caller's own
@@ -65,6 +66,8 @@ Optionally add a second organisation `('Cheri & Co. (sample demo)', true)` and a
 - Slice 3: Products (list, detail, create, edit; `products:write` = owner/admin/approver/staff) and Content (`content_items`: social
   posts on Instagram, Facebook and LinkedIn; create, edit a draft or rejected post, submit for approval). A post's status follows its
   approval (queued as a pending `approvals` row, decided through `decide_approval()`); `content_items.status` is mirrored after a decision.
+  A post is shown as approved or rejected only when an approval whose `meta.postId` names that post says so; a status or `approval_id` written straight to
+  the table (writers are allowed to update `content_items`) is not believed and shows as a draft. Edits made straight to an already approved post's caption are not detected (no schema change was made to block them).
   Gaps: no engagement/metrics columns (Performance is "not available"); no asset storage; no brand-rule table; "Simulate publish" is
   demo-only (the app never posts); the Content pack generator uses the sample catalogue so it is hidden for live orgs; posts on
   Pinterest, Email and Amazon A+ are allowed by the table but have no screen; no delete UI; a product price or stock left blank stays null.
@@ -79,8 +82,11 @@ Optionally add a second organisation `('Cheri & Co. (sample demo)', true)` and a
   For a live organisation these show "Not connected yet" or empty, never sample data.
 
 ## Known limitations
-- Agent data is still sample data in server memory; this work does not store business data yet.
+- Sample data lives in server memory and is shown only to demo organisations and the public demo. B2C Sales and Amazon Intelligence have no stored data yet.
+- Lists are read in pages of 1000 rows; a single list of more than 10,000 records is refused with an error rather than shown incomplete. Tasks cannot be assigned to a person yet (the assignee is not stored).
 - The prohibited-claims guard for content runs in the application, not inside `decide_approval()`.
+- A post counts as approved only if its approval's `meta.postId` equals the post's id. Approvals created before that field existed (legacy approvals without `meta.postId`) do not approve anything: their post shows as a draft, even if the approval itself was approved. A post stuck at pending approval can be edited back to a draft and submitted again. No such data is known to exist on the hosted project (unverified).
+- Postponing a task adds one day to its current due date. An overdue task therefore stays overdue (10 days overdue becomes 9); a task with no due date gets one day from now.
 - One organisation per user is read (the oldest membership). Multi-organisation switching is not built.
 - A password-based sign-in with no MFA, no password reset page and no rate limiting beyond Supabase's own defaults.
 - The repo is public and Vercel is on the Hobby plan (non-commercial); unchanged by this work.

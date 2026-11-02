@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { isLiveOrg } from "@/lib/auth/access";
 import { getTasks } from "@/services";
 import { PageHeader } from "@/components/ui";
 import { TaskList } from "@/components/interactive";
@@ -10,7 +11,7 @@ export default async function TasksPage() {
   return (
     <div className="stack">
       <PageHeader eyebrow="CRM & Sales Operations Agent" title="Tasks & follow-ups" subtitle="Created by your agents and by you. Nothing slips through." />
-      <TaskList initial={tasks} />
+      <TaskList initial={tasks} live={await isLiveOrg()} />
     </div>
   );
 }

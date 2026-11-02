@@ -46,6 +46,9 @@ export function parseDue(text: string | undefined | null, now = new Date()): str
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
+/** What the Postpone button sends as the new due text. For a live task it means "one day later", not a date to parse. */
+export const POSTPONE_LABEL = "Postponed +1 day";
+
 const asPriority = (v: string): Priority => (v === "high" || v === "low" ? v : "medium");
 
 export function toTask(r: TaskRow, names: Map<string, string>, now = new Date()): Task {
@@ -139,7 +142,7 @@ export function toProduct(r: ProductRow): Product {
 export const SOCIAL_DB_PLATFORMS: readonly SocialPlatform[] = ["Instagram", "Facebook", "LinkedIn"];
 
 /** The database status is only a fallback: when the post has an approval, its status follows that approval (see deriveStatus).
- *  The app never publishes, so a row marked "published" (a person did it by hand) is shown as approved. */
+ *  The app never publishes; a row marked "published" counts as approved only if an approval for it says so (otherwise it is a draft). */
 const SOCIAL_STATUS: Record<string, SocialStatus> = { draft: "draft", pending_approval: "pending_approval", approved: "approved", rejected: "rejected", published: "approved" };
 
 export function toSocialPost(r: ContentRow): SocialPost {
@@ -148,8 +151,8 @@ export function toSocialPost(r: ContentRow): SocialPost {
     creativeBrief: r.creative_brief ?? "", imageDirection: r.image_direction ?? "",
     scheduledFor: r.scheduled_for ?? r.created_at.slice(0, 10), // an undated legacy row is placed on the day it was created
     approvalId: r.approval_id ?? undefined, isSample: false, tone: "rose",
-    // "pending approval" with no approval behind it is a submission that never completed: nothing is waiting, so it is a draft again
-    seedStatus: r.status === "pending_approval" && !r.approval_id ? "draft" : (SOCIAL_STATUS[r.status] ?? "draft"),
+    // a status is believed only with an approval behind it (and liveSocialPosts re-checks that approval); a stored status alone, such as one set by hand, is a draft
+    seedStatus: r.approval_id ? (SOCIAL_STATUS[r.status] ?? "draft") : "draft",
   };
 }
 

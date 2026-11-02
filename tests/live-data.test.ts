@@ -4,14 +4,16 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 type Row = Record<string, unknown>;
-interface Call { table: string; op: string; eq: Row; payload?: Row }
+interface Call { table: string; op: string; eq: Row; payload?: Row; range?: [number, number] }
 const h = vi.hoisted(() => ({
   tables: {} as Record<string, Row[]>,
-  calls: [] as { table: string; op: string; eq: Record<string, unknown>; payload?: Record<string, unknown> }[],
+  calls: [] as { table: string; op: string; eq: Record<string, unknown>; payload?: Record<string, unknown>; range?: [number, number] }[],
   rpcCalls: [] as { fn: string; args: Record<string, unknown> }[],
   rpcResult: { data: null, error: null } as { data: unknown; error: { code?: string; message: string } | null },
   insertError: null as { code?: string; message: string } | null,
   /** Makes a matching update fail with an error, or match no rows when it returns "empty". */
+  /** Emulates the API's max-rows setting (1000 by default): no response carries more rows than this, whatever the query asks for. */
+  maxRows: 1000,
   updateFault: null as null | ((table: string, payload: Record<string, unknown>) => { code?: string; message: string } | "empty" | null),
 }));
 
@@ -32,6 +34,7 @@ vi.mock("@/lib/supabase/server", () => ({
         not: (k: string, op: string, v: unknown) => { call.eq[`not:${k}`] = `${op} ${String(v)}`; return q; },
         gte: (k: string, v: unknown) => { call.eq[`gte:${k}`] = v; return q; },
         in: () => q, order: () => q, limit: () => q,
+        range: (a: number, b: number) => { call.range = [a, b]; return q; },
         single: () => { single = true; return q; },
         maybeSingle: () => { single = true; return q; },
         then: (resolve: (v: { data: unknown; error: unknown }) => void) => {
@@ -47,7 +50,8 @@ vi.mock("@/lib/supabase/server", () => ({
               const col = k.slice(4), [op, arg] = String(v).split(/ (.*)/s);
               return op === "is" ? r[col] !== null && r[col] !== undefined : !arg.slice(1, -1).split(",").includes(String(r[col]));
             })).map((r) => (call.op === "update" ? { ...r, ...call.payload } : r));
-          resolve({ data: single ? (rows[0] ?? null) : rows, error: null });
+          const paged = (call.range ? rows.slice(call.range[0], call.range[1] + 1) : rows).slice(0, h.maxRows);
+          resolve({ data: single ? (rows[0] ?? null) : paged, error: null });
         },
       };
       return q;
@@ -70,7 +74,7 @@ beforeEach(() => {
   vi.stubEnv("AUTH_MODE", "required");
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.invalid");
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon-test");
-  h.calls.length = 0; h.rpcCalls.length = 0; h.insertError = null; h.updateFault = null;
+  h.calls.length = 0; h.rpcCalls.length = 0; h.insertError = null; h.updateFault = null; h.maxRows = 1000;
   h.rpcResult = { data: null, error: null };
   h.tables = {
     tasks: [{ id: "t1", org_id: ORG, title: "Call Asha", source: "CRM & Sales Ops Agent", due_at: null, priority: "high", status: "open", assignee_id: null, related_ref: null },
@@ -387,7 +391,7 @@ const seedCatalogue = () => {
     contentRow({ id: POST_PENDING, title: "Waiting", status: "pending_approval", approval_id: APPROVAL_ID }),
     contentRow({ id: POST_OTHER, org_id: "other-org", title: "Other org post" }),
   ];
-  h.tables.approvals = [...(h.tables.approvals ?? []), { id: APPROVAL_ID, org_id: ORG, title: "Waiting · Instagram post", type: "Content", generated_by: "content", status: "approved", preview: "x", meta: null, created_at: stamp }];
+  h.tables.approvals = [...(h.tables.approvals ?? []), { id: APPROVAL_ID, org_id: ORG, title: "Waiting · Instagram post", type: "Content", generated_by: "content", status: "approved", preview: "x", meta: { kind: "content_draft", postId: POST_PENDING }, created_at: stamp }];
 };
 
 describe("slice 3: live products", () => {
@@ -480,7 +484,7 @@ describe("slice 3: live content calendar and approval workflow", () => {
   });
   it("scopes content queries by organisation and falls back safely on odd rows", () => {
     expect(toSocialPost(contentRow({ scheduled_for: null, status: "published", topic: null, caption: null, hashtags: null }) as never))
-      .toMatchObject({ scheduledFor: stamp.slice(0, 10), seedStatus: "approved", topic: "", caption: "", hashtags: [] });
+      .toMatchObject({ scheduledFor: stamp.slice(0, 10), seedStatus: "draft", topic: "", caption: "", hashtags: [] }); // no approval behind it, so never approved
   });
   it("creates a draft in the session's organisation with a default planned date", async () => {
     h.calls.length = 0;
@@ -770,5 +774,232 @@ describe("slice 4: revenue and purchase rules", () => {
     h.calls.length = 0;
     expect((await getReports()).map((r) => r.id)).toEqual(["sales"]);
     expect(h.calls.filter((c) => c.op !== "select")).toEqual([]);
+  });
+});
+
+
+/* ---------- Stabilisation: refusals, paging, task assignee and postpone (fake client: application logic, not the real database) ---------- */
+import { POST as decideRoute } from "@/app/api/approvals/[id]/[action]/route";
+import { allRows, LIST_CAP, liveSalesReport } from "@/services/live";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { TaskList } from "@/components/interactive";
+
+const RLS_REFUSAL = { code: "42501", message: "new row violates row-level security policy" };
+const patchTask = (id: string, body: unknown) => patchResource(jreq("PATCH", `https://app.test/api/tasks/${id}`, body), { params: Promise.resolve({ resource: "tasks", id }) });
+const postTask = (body: unknown) => postResource(jreq("POST", "https://app.test/api/tasks", body), { params: Promise.resolve({ resource: "tasks" }) });
+const patchPipeline = (id: string, body: unknown) => patchResource(jreq("PATCH", `https://app.test/api/pipeline/${id}`, body), { params: Promise.resolve({ resource: "pipeline", id }) });
+const decide = (id: string, action: string, body?: unknown) => decideRoute(jreq("POST", `https://app.test/api/approvals/${id}/${action}`, body), { params: Promise.resolve({ id, action }) });
+
+describe("a database refusal is a 403 on every write route, not a 500", () => {
+  beforeEach(() => { seedPipeline(); });
+  it("creating a task", async () => {
+    h.insertError = RLS_REFUSAL;
+    expect((await postTask({ title: "Call back" })).status).toBe(403);
+  });
+  it("updating a task", async () => {
+    h.updateFault = () => RLS_REFUSAL;
+    expect((await patchTask("t1", { status: "done" })).status).toBe(403);
+  });
+  it("moving a pipeline card", async () => {
+    h.updateFault = () => RLS_REFUSAL;
+    expect((await patchPipeline(L1, { stage: "won" })).status).toBe(403);
+  });
+  it("deciding an approval", async () => {
+    h.rpcResult = { data: null, error: { code: "42501", message: "not authorized to decide approvals" } };
+    expect((await decide("a1", "approve")).status).toBe(403);
+    expect((await decide("a1", "reject")).status).toBe(403);
+  });
+  it("an unrelated database failure is still an error, not disguised as a refusal", async () => {
+    h.updateFault = () => ({ code: "XX000", message: "internal failure" });
+    await expect(patchTask("t1", { status: "done" })).rejects.toThrow(/Database request failed/);
+  });
+  it("a viewer is refused before the database is reached", async () => {
+    setRole("viewer"); h.calls.length = 0;
+    expect((await postTask({ title: "x" })).status).toBe(403);
+    expect((await patchTask("t1", { status: "done" })).status).toBe(403);
+    expect((await patchPipeline(L1, { stage: "won" })).status).toBe(403);
+    expect((await decide("a1", "approve")).status).toBe(403);
+    expect(h.calls.filter((c) => c.op !== "select")).toEqual([]);
+    expect(h.rpcCalls).toEqual([]);
+  });
+  it("only owner, admin and approver may decide; staff may not", async () => {
+    for (const role of ["owner", "admin", "approver"]) {
+      setRole(role);
+      h.rpcResult = { data: { id: "a1", title: "t", type: "Instagram reply", generated_by: "b2c", status: "approved", preview: "p", meta: null, created_at: stamp }, error: null };
+      expect((await decide("a1", "approve")).status, role).toBe(200);
+    }
+    setRole("staff");
+    expect((await decide("a1", "approve")).status).toBe(403);
+  });
+});
+
+describe("live tasks: assignee and postpone", () => {
+  beforeEach(() => { h.tables.tasks[0] = { ...h.tables.tasks[0], due_at: "2026-11-10T10:00:00.000Z" }; });
+  it("an assignee change is refused instead of reporting a save that did not happen", async () => {
+    h.calls.length = 0;
+    const res = await patchTask("t1", { assignee: "Dev" });
+    expect(res.status).toBe(409);
+    expect(h.calls.some((c) => c.op === "update")).toBe(false);
+    expect((await patchTask("t1", { status: "done", assignee: "Dev" })).status).toBe(409);
+  });
+  it("Postpone moves the due date one day later and keeps it, instead of clearing it", async () => {
+    h.calls.length = 0;
+    const res = await patchTask("t1", { status: "postponed", due: "Postponed +1 day" });
+    expect(res.status).toBe(200);
+    const upd = h.calls.find((c) => c.table === "tasks" && c.op === "update")!;
+    expect(upd.payload).toEqual({ status: "postponed", due_at: "2026-11-11T10:00:00.000Z" });
+    expect(upd.eq).toMatchObject({ org_id: ORG, id: "t1" });
+  });
+  it("Postpone on a task with no due date sets one day from now, and on another organisation's task is a 404", async () => {
+    h.tables.tasks[0] = { ...h.tables.tasks[0], due_at: null };
+    const before = Date.now();
+    await patchTask("t1", { status: "postponed", due: "Postponed +1 day" });
+    const due = Date.parse(String((h.calls.find((c) => c.op === "update")!.payload as Row).due_at));
+    expect(due).toBeGreaterThanOrEqual(before + 86_400_000 - 1000);
+    expect((await patchTask("t2", { status: "postponed", due: "Postponed +1 day" })).status).toBe(404);
+  });
+  it("the live task list shows the assignee as text and offers no name picker; the demo keeps its picker", () => {
+    const tasks = [{ id: "t1", title: "Call Asha", source: "Manual", due: "Today", priority: "high", assignee: "Unassigned", status: "open", href: "/tasks" }] as never;
+    const live = renderToStaticMarkup(createElement(TaskList, { initial: tasks, live: true }));
+    expect(live).toContain("Unassigned");
+    expect(live).not.toContain("<select");
+    expect(live).not.toContain("Anika");
+    expect(renderToStaticMarkup(createElement(TaskList, { initial: tasks }))).toContain("<select");
+  });
+});
+
+describe("lists are complete, or refused: nothing is cut short quietly", () => {
+  const manyCustomers = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `c-${String(i).padStart(5, "0")}`, org_id: ORG, name: `Customer ${i}`, instagram: null, phone: null, email: null, city: null, interests: [], created_at: stamp }));
+  it("returns all 2,500 customers even though one response carries at most 1,000 rows", async () => {
+    h.tables.customers = manyCustomers(2500); h.tables.orders = []; h.calls.length = 0;
+    expect((await getCustomers()).length).toBe(2500);
+    expect(h.calls.filter((c) => c.table === "customers" && c.range).map((c) => c.range)).toEqual([[0, 999], [1000, 1999], [2000, 2999]]);
+  });
+  it("a list of exactly one page needs one extra empty page and loses nothing", async () => {
+    h.tables.customers = manyCustomers(1000); h.tables.orders = [];
+    expect((await getCustomers()).length).toBe(1000);
+  });
+  it("purchase counts read every order, not only the first 1,000", async () => {
+    h.tables.customers = [{ ...manyCustomers(1)[0], id: C1 }];
+    h.tables.orders = Array.from({ length: 2500 }, () => ({ customer_id: C1, org_id: ORG, status: "paid" }));
+    expect((await getCustomers())[0].purchases).toBe(2500);
+  });
+  it("the Sales report totals every delivered order (2,500 orders of 100.00 in the latest week)", async () => {
+    const now = new Date("2026-11-20T12:00:00Z");
+    h.tables.orders = Array.from({ length: 2500 }, () => ({ org_id: ORG, status: "delivered", total: "100.00", ordered_at: "2026-11-19T12:00:00Z" }));
+    const sales = await liveSalesReport(now);
+    expect(sales.metrics[1].value).toBe("2,500");
+    expect(sales.metrics[0].value).toBe("₹2,50,000");
+  });
+  it("tasks are complete as well (no 200-row cut)", async () => {
+    h.tables.tasks = Array.from({ length: 1200 }, (_, i) => ({ id: `t-${i}`, org_id: ORG, title: `T${i}`, source: "Manual", due_at: null, priority: "low", status: "open", assignee_id: null, related_ref: null }));
+    expect((await getTasks()).length).toBe(1200);
+  });
+  it("a list beyond the hard cap is an error, not a short list", async () => {
+    const page = async (from: number, to: number) => ({ data: Array.from({ length: to - from + 1 }, (_, i) => ({ n: from + i })), error: null });
+    await expect(allRows(page, 2500)).rejects.toThrow(/Too many records/);
+    expect(LIST_CAP).toBe(10_000);
+    const small = async (from: number) => ({ data: from === 0 ? [{ n: 1 }, { n: 2 }] : [], error: null });
+    expect(await allRows(small)).toEqual([{ n: 1 }, { n: 2 }]);
+  });
+  it("a database error while paging is surfaced (a refusal as an AuthError, anything else as an error)", async () => {
+    await expect(allRows(async () => ({ data: null, error: RLS_REFUSAL }))).rejects.toBeInstanceOf(AuthError);
+    await expect(allRows(async () => ({ data: null, error: { message: "boom" } }))).rejects.toThrow(/Database request failed/);
+  });
+});
+
+
+/* ---------- Sweep: every read route, for a live organisation, returns neither sample data nor another organisation's rows ---------- */
+import { GET as getAgentsView } from "@/app/api/agents/[view]/route";
+import { GET as getAmazonRoute } from "@/app/api/amazon/insights/route";
+import { GET as getDiscoverRoute } from "@/app/api/b2b/discover/route";
+import { GET as getCalendarRoute } from "@/app/api/content/calendar/route";
+import { GET as getSuggestionsRoute } from "@/app/api/crm/suggestions/route";
+import { GET as getSummaryRoute } from "@/app/api/dashboard/summary/route";
+import { GET as getSocialRoute } from "@/app/api/social/posts/route";
+import { GET as getOneResource } from "@/app/api/[resource]/[id]/route";
+
+describe("live organisation: no read route leaks sample data or another organisation's rows", () => {
+  const SAMPLE = /SAMPLE|Aurelia|Moonlit|Priya Sharma|Ananya|Mira Boutique|Anika|amazonClicks/i;
+  const get = (url: string) => new Request(url, { headers: json });
+  const resources = ["leads", "customers", "retailers", "conversations", "products", "orders", "content", "tasks", "approvals", "reports"];
+
+  beforeEach(() => {
+    h.tables.orders = [{ id: "o-other", org_id: "other-org", customer_id: null, retailer_id: null, channel: "amazon", status: "delivered", total: "999", line_items: [], ordered_at: stamp }];
+    h.tables.customers = [{ id: "c-other", org_id: "other-org", name: "Not mine customer", instagram: null, phone: null, email: null, city: null, interests: [], created_at: stamp }];
+    h.tables.retailers = []; h.tables.leads = []; h.tables.products = []; h.tables.content_items = [];
+  });
+
+  it("every collection and view route", async () => {
+    const bodies: Record<string, string> = {};
+    for (const r of resources) bodies[r] = await (await getResource(get(`https://app.test/api/${r}`), { params: Promise.resolve({ resource: r }) })).text();
+    bodies.status = await (await getAgentsView(get("https://app.test/api/agents/status"), { params: Promise.resolve({ view: "status" }) })).text();
+    bodies.activity = await (await getAgentsView(get("https://app.test/api/agents/activity"), { params: Promise.resolve({ view: "activity" }) })).text();
+    bodies.amazon = await (await getAmazonRoute()).text();
+    bodies.discover = await (await getDiscoverRoute()).text();
+    bodies.calendar = await (await getCalendarRoute()).text();
+    bodies.suggestions = await (await getSuggestionsRoute()).text();
+    bodies.summary = await (await getSummaryRoute(get("https://app.test/api/dashboard/summary?range=30d"))).text();
+    bodies.social = await (await getSocialRoute()).text();
+    for (const [name, body] of Object.entries(bodies)) {
+      if (name !== "discover") expect(body, name).not.toMatch(SAMPLE); // discover returns only a label ("SAMPLE candidates...") and an empty list
+      expect(body, name).not.toMatch(/Not mine|other-org|o-other|c-other/);
+    }
+    expect(JSON.parse(bodies.customers)).toEqual([]);
+    expect(JSON.parse(bodies.orders)).toEqual([]);
+    expect(JSON.parse(bodies.discover).data.candidates).toEqual([]);
+  });
+
+  it("single-record routes refuse another organisation's id and any sample id", async () => {
+    for (const [resource, id] of [["customers", "c-other"], ["customers", "c1"], ["retailers", "r1"], ["products", "p1"], ["orders", "o-other"]] as const) {
+      const res = await getOneResource(get(`https://app.test/api/${resource}/${id}`), { params: Promise.resolve({ resource, id }) });
+      expect(res.status, `${resource}/${id}`).toBe(404);
+    }
+  });
+
+  it("a signed-in user with no membership gets 403 from every read route", async () => {
+    h.tables.memberships = [];
+    for (const r of resources) {
+      const res = await getResource(get(`https://app.test/api/${r}`), { params: Promise.resolve({ resource: r }) });
+      expect(res.status, r).toBe(403);
+    }
+    expect((await getSummaryRoute(get("https://app.test/api/dashboard/summary"))).status).toBe(403);
+    expect((await getSocialRoute()).status).toBe(403);
+  });
+
+  it("a demo organisation (is_demo) still gets sample data from the same routes", async () => {
+    setMembership(true);
+    expect(await (await getSummaryRoute(get("https://app.test/api/dashboard/summary"))).text()).toMatch(SAMPLE);
+  });
+});
+
+
+describe("a post is approved only when a human approval raised for that very post says so", () => {
+  const POST_B = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  beforeEach(() => { seedCatalogue(); });
+  it("a status set by hand (approved or published, no approval) is shown as a draft", async () => {
+    h.tables.content_items = [contentRow({ status: "approved", approval_id: null }), contentRow({ id: POST_B, status: "published", approval_id: null })];
+    const posts = await getSocialPosts();
+    expect(posts.map((p) => p.status)).toEqual(["draft", "draft"]);
+  });
+  it("a post pointed at another post's approved approval is not approved", async () => {
+    // APPROVAL_ID was raised for POST_PENDING; POST1 is re-pointed at it by a writer calling the database directly
+    h.tables.content_items = [contentRow({ id: POST1, status: "approved", approval_id: APPROVAL_ID }), contentRow({ id: POST_PENDING, status: "approved", approval_id: APPROVAL_ID })];
+    const posts = await getSocialPosts();
+    expect(posts.find((p) => p.id === POST1)!.status).toBe("draft");
+    expect(posts.find((p) => p.id === POST_PENDING)!.status).toBe("approved");
+  });
+  it("an approval without the post id (not raised by this app) does not approve anything", async () => {
+    h.tables.approvals = [{ id: APPROVAL_ID, org_id: ORG, title: "x", type: "Content", generated_by: "content", status: "approved", preview: "x", meta: null, created_at: stamp }];
+    h.tables.content_items = [contentRow({ id: POST1, status: "approved", approval_id: APPROVAL_ID })];
+    expect((await getSocialPosts())[0].status).toBe("draft");
+  });
+  it("submitting records the post id in the approval, so the link can be verified later", async () => {
+    h.tables.content_items = [contentRow({})];
+    h.calls.length = 0;
+    expect((await postAction(POST1, "submit")).status).toBe(200);
+    const made = h.calls.find((c) => c.table === "approvals" && c.op === "insert")!;
+    expect((made.payload as { meta: { postId: string } }).meta.postId).toBe(POST1);
   });
 });
