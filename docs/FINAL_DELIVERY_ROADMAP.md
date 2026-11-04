@@ -254,7 +254,7 @@ anything behind `app.cheri.co.in` (CSRF origin check via `x-forwarded-host`, coo
 1. Older write routes (tasks, pipeline, approvals) did not map a database refusal to 403; an RLS refusal there would have surfaced as 500. **Fixed (uncommitted).**
 2. The live Tasks screen offered a demo name picker whose changes were not saved. **Fixed (uncommitted):** plain text for real organisations, and the API refuses an assignee change with 409.
 3. Stale text in Settings and `docs/SUPABASE_SETUP.md`. **Fixed (uncommitted).**
-4. No create forms for customers, retailers, tasks or orders (API only); no import path. **Open** (M2).
+4. No create forms for customers, retailers, tasks or orders (API only); no import path. **Built for M2 on `feature/client-delivery` (uncommitted, local tests only; not verified against a hosted database or seen with live data):** forms, edit for customers and retailers, order status, CSV import with preview, duplicates and summaries. See `docs/M2_DATA_ENTRY_AND_IMPORT.md`.
 5. Silent list limits: 500 rows, 200 for tasks/approvals/audit, and 5,000 for purchase counts (which the API's own 1000-row cap would have cut to 1000). **Fixed (uncommitted)** by reading complete lists page by page; UNVERIFIED on the hosted API.
 6. Dashboard KPI cards, trends and agent tiles are empty for live organisations; date range and "Custom" are demo behaviour.
 7. Per-record activity timelines showed the same global feed in the demo (documented in `UX_FLOWS.md`); live behaviour **UNVERIFIED**.

@@ -2,15 +2,20 @@ import type { Metadata } from "next";
 import { isLiveOrg } from "@/lib/auth/access";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { can } from "@/lib/auth/roles";
+import { getAuthUser } from "@/lib/auth/session";
 import { getActivities, getConversations, getCustomer, getTasks } from "@/services";
 import { PageHeader, DashboardCard, SectionHeader, Avatar, StatusBadge, EmptyState } from "@/components/ui";
 import { ActivityTimeline } from "@/components/domain";
+import { RecordForm } from "@/components/record-form";
+import { CUSTOMER_FIELDS } from "@/lib/forms";
 
 export const metadata: Metadata = { title: "Customer" };
 
 export default async function CustomerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const live = await isLiveOrg();
+  const canEdit = live && can((await getAuthUser())?.role, "pipeline:write");
   const customer = await getCustomer(id);
   if (!customer) notFound();
   const [convos, tasks, activities] = await Promise.all([getConversations(), getTasks(), getActivities()]);
@@ -31,6 +36,14 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
               <dt>Interests</dt><dd>{customer.interests.map((i) => <span className="tag" key={i}>{i}</span>)}</dd>
             </dl>
           </DashboardCard>
+          {canEdit && (
+            <DashboardCard>
+              <SectionHeader title="Edit customer" />
+              <RecordForm id={`edit-${customer.id}`} fields={CUSTOMER_FIELDS} endpoint={`/api/customers/${customer.id}`} method="PATCH" submitLabel="Save changes" savedText="Customer saved."
+                initial={{ name: customer.name, email: customer.email, phone: customer.phone, instagram: customer.instagram, city: customer.city, interests: customer.interests.join(", ") }}
+                invalidHint="Check the fields: a name is required, and email, phone and interests must be in a valid format." />
+            </DashboardCard>
+          )}
           <DashboardCard>
             <SectionHeader title="History" />
             <div className="grid three" style={{ marginBottom: 18 }}>

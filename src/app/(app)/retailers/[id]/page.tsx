@@ -3,19 +3,27 @@ import { isLiveOrg } from "@/lib/auth/access";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ExternalLink } from "lucide-react";
+import { can } from "@/lib/auth/roles";
+import { getAuthUser } from "@/lib/auth/session";
 import { getActionLinks, getActivities, getRetailer, getTasks } from "@/services";
 import { followUpFor, qualificationFactors } from "@/lib/agent-logic";
 import { QueueButton } from "@/components/agent-actions";
 import { FactorList } from "@/components/agent-views";
 import { PageHeader, DashboardCard, SectionHeader, Score, SimBadge, StatusBadge } from "@/components/ui";
 import { ActivityTimeline } from "@/components/domain";
+import { RecordForm } from "@/components/record-form";
+import { RETAILER_FIELDS } from "@/lib/forms";
 import { STAGE_LABELS } from "@/lib/agents";
 
 export const metadata: Metadata = { title: "Retailer" };
 
+/** A retailer field that was never filled in is shown as "Not recorded"; the edit form should start blank, not with that text. */
+const unrecorded = (v: string) => (v === "Not recorded" ? "" : v);
+
 export default async function RetailerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const live = await isLiveOrg();
+  const canEdit = live && can((await getAuthUser())?.role, "pipeline:write");
   const r = await getRetailer(id);
   if (!r) notFound();
   const [tasks, activities, links] = await Promise.all([getTasks(), getActivities(), getActionLinks()]);
@@ -38,6 +46,17 @@ export default async function RetailerPage({ params }: { params: Promise<{ id: s
               <dt>Google Maps</dt><dd><a className="link" href={r.mapsUrl} target="_blank" rel="noopener noreferrer">Open map <ExternalLink size={12} /></a></dd>
             </dl>
           </DashboardCard>
+          {canEdit && (
+            <DashboardCard>
+              <SectionHeader title="Edit retailer" />
+              <RecordForm id={`edit-${r.id}`} fields={RETAILER_FIELDS} endpoint={`/api/retailers/${r.id}`} method="PATCH" submitLabel="Save changes" savedText="Retailer saved."
+                initial={{
+                  business: r.business, location: r.location, category: r.category, contact: unrecorded(r.contact), email: unrecorded(r.email), phone: unrecorded(r.phone),
+                  instagram: unrecorded(r.instagram), website: unrecorded(r.website), qualification: r.qualification,
+                }}
+                invalidHint="Check the fields: a business name is required, and the other fields must not be too long." />
+            </DashboardCard>
+          )}
           <DashboardCard>
             <SectionHeader title="Qualification" />
             <dl className="kv">

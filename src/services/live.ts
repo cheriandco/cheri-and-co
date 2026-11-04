@@ -19,6 +19,14 @@ import type { Store } from "./store";
 
 export class LiveError extends Error {}
 
+/** `quiet`: skip the per-record activity line. Used by CSV import, which writes one summary line instead. */
+export interface WriteOptions { quiet?: boolean }
+
+/** One activity line for a whole CSV import. */
+export async function liveImportLog(resource: string, created: number): Promise<void> {
+  if (created > 0) await liveLog({ agent: resource === "retailers" ? "b2b" : "crm", action: `Imported ${created} ${resource} from a CSV file` });
+}
+
 /** Rows fetched per request. The API answers with at most its own max-rows setting (1000 by default), so a plain `.limit(5000)` quietly
  *  returned 1000. Lists are therefore read page by page until they are complete. */
 const PAGE_SIZE = 1000;
@@ -71,14 +79,14 @@ export async function liveTasks(): Promise<Task[]> {
   return rows.map((r) => toTask(r, n));
 }
 
-export async function liveCreateTask(input: Pick<Task, "title" | "due" | "priority">, from?: Pick<Task, "source" | "href">): Promise<Task> {
+export async function liveCreateTask(input: Pick<Task, "title" | "due" | "priority">, from?: Pick<Task, "source" | "href">, opts: WriteOptions = {}): Promise<Task> {
   const { supabase, orgId } = await ctx();
   const { data, error } = await supabase.from("tasks").insert({
     org_id: orgId, title: input.title, priority: input.priority, due_at: parseDue(input.due),
     source: from?.source ?? "Manual", related_ref: from?.href ?? null,
   }).select("id, title, source, due_at, priority, status, assignee_id, related_ref").single();
   if (error) fail(error);
-  await liveLog({ agent: "crm", action: `Created task: ${input.title}` });
+  if (!opts.quiet) await liveLog({ agent: "crm", action: `Created task: ${input.title}` });
   return toTask(data as TaskRow, new Map());
 }
 
@@ -212,12 +220,25 @@ export async function liveCustomer(id: string): Promise<Customer | null> {
   return toCustomer(data as CustomerRow, counts.get(id) ?? 0);
 }
 
-export async function liveCreateCustomer(input: CustomerInput): Promise<Customer> {
+export async function liveCreateCustomer(input: CustomerInput, opts: WriteOptions = {}): Promise<Customer> {
   const { supabase, orgId } = await ctx();
   const { data, error } = await supabase.from("customers").insert({ org_id: orgId, ...input }).select(CUSTOMER_COLS).single();
   if (error) fail(error);
-  await liveLog({ agent: "crm", action: `Added customer: ${input.name}` });
+  if (!opts.quiet) await liveLog({ agent: "crm", action: `Added customer: ${input.name}` });
   return toCustomer(data as CustomerRow, 0);
+}
+
+/** Replaces the editable fields of a customer. null when the customer does not exist in this organisation. */
+export async function liveUpdateCustomer(id: string, input: CustomerInput): Promise<Customer | null> {
+  if (!UUID.test(id)) return null;
+  const { supabase, orgId } = await ctx();
+  const { data, error } = await supabase.from("customers").update(input).eq("org_id", orgId).eq("id", id).select(CUSTOMER_COLS);
+  if (error) fail(error);
+  const row = ((data ?? []) as CustomerRow[])[0];
+  if (!row) return null;
+  await liveLog({ agent: "crm", action: `Updated customer: ${input.name}` });
+  const counts = await purchaseCounts(supabase, orgId);
+  return toCustomer(row, counts.get(id) ?? 0);
 }
 
 /** Retailers with their lead. A retailer without a lead row shows as a new, unscored retailer. */
@@ -238,14 +259,27 @@ export async function liveRetailersAndDeals(): Promise<{ retailers: Retailer[]; 
 }
 
 /** Creates the retailer and its first lead (stage "new"). If the lead insert fails the retailer is kept and shows as new. */
-export async function liveCreateRetailer(input: RetailerInput): Promise<Retailer> {
+export async function liveCreateRetailer(input: RetailerInput, opts: WriteOptions = {}): Promise<Retailer> {
   const { supabase, orgId } = await ctx();
   const { data, error } = await supabase.from("retailers").insert({ org_id: orgId, ...input }).select(RETAILER_COLS).single();
   if (error) fail(error);
   const retailer = data as RetailerRow;
   const lead = await supabase.from("leads").insert({ org_id: orgId, retailer_id: retailer.id, stage: "new" }).select(LEAD_COLS).single();
-  await liveLog({ agent: "b2b", action: `Added retailer: ${input.business}` });
+  if (!opts.quiet) await liveLog({ agent: "b2b", action: `Added retailer: ${input.business}` });
   return toRetailer(retailer, lead.error ? undefined : (lead.data as LeadRow));
+}
+
+/** Replaces the editable fields of a retailer. The lead (stage, score) is not touched. null when the retailer is not in this organisation. */
+export async function liveUpdateRetailer(id: string, input: RetailerInput): Promise<Retailer | null> {
+  if (!UUID.test(id)) return null;
+  const { supabase, orgId } = await ctx();
+  const { data, error } = await supabase.from("retailers").update(input).eq("org_id", orgId).eq("id", id).select(RETAILER_COLS);
+  if (error) fail(error);
+  const row = ((data ?? []) as RetailerRow[])[0];
+  if (!row) return null;
+  const leads = await supabase.from("leads").select(LEAD_COLS).eq("org_id", orgId).eq("retailer_id", id).order("last_activity_at", { ascending: false }).limit(1);
+  await liveLog({ agent: "b2b", action: `Updated retailer: ${input.business}` });
+  return toRetailer(row, leads.error ? undefined : ((leads.data ?? []) as LeadRow[])[0]);
 }
 
 export async function liveMoveDeal(id: string, stage: PipelineStage): Promise<Deal | null> {
@@ -456,7 +490,7 @@ export async function liveOrder(id: string): Promise<Order | null> {
 }
 
 /** A customer or retailer from another organisation is refused by the database's composite foreign key (org_id, id). */
-export async function liveCreateOrder(input: OrderInput): Promise<Order> {
+export async function liveCreateOrder(input: OrderInput, opts: WriteOptions = {}): Promise<Order> {
   const { supabase, orgId } = await ctx();
   const row = {
     org_id: orgId, customer_id: input.customerId, retailer_id: input.retailerId, channel: input.channel, status: input.status,
@@ -467,7 +501,7 @@ export async function liveCreateOrder(input: OrderInput): Promise<Order> {
     if (isForeignKey(error)) throw new ConflictError("Unknown customer or retailer");
     fail(error);
   }
-  await liveLog({ action: `Recorded a ${input.channel} order` });
+  if (!opts.quiet) await liveLog({ action: `Recorded a ${input.channel} order` });
   return toOrder(data as OrderRow);
 }
 

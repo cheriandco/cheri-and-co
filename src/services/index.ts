@@ -14,9 +14,10 @@ import { AGENT_NAMES, STAGE_LABELS } from "@/lib/agents";
 import { renderDraft } from "@/lib/content-agent/render";
 import type { CustomerInput, OrderInput, ProductInput, RetailerInput } from "@/lib/validate";
 import {
-  liveCreateCustomer, liveCreateProduct, liveCreateRetailer, liveCreateSocialPost, liveCreateTask, liveCustomer, liveCustomers, liveDecideApproval,
+  liveCreateCustomer, liveCreateProduct, liveCreateRetailer, liveImportLog, liveUpdateCustomer, liveUpdateRetailer, liveCreateSocialPost, liveCreateTask, liveCustomer, liveCustomers, liveDecideApproval,
   liveCreateOrder, liveMoveDeal, liveSalesReport, liveOrder, liveOrders, liveProduct, liveProducts, liveSocialPosts, liveSubmitSocialPost, liveUpdateOrderStatus, liveUpdateProduct, liveUpdateSocialPost, liveUpdateTask,
 } from "./live";
+import type { WriteOptions } from "./live";
 import { readStore, writableStore, type Store } from "./store";
 import type { Product, Order, OrderStatus,
   Activity, AgentKey, Approval, AuditEntry, Conversation, Customer, DashboardSummary, Deal, PipelineStage,
@@ -95,8 +96,8 @@ export async function getAmazon() {
 }
 
 export async function getTasks(): Promise<Task[]> { await tick(); return (await readStore()).tasks; }
-export async function createTask(input: Pick<Task, "title" | "due" | "priority" | "assignee">, from?: Pick<Task, "source" | "href">): Promise<Task> {
-  if (await isLiveOrg()) return liveCreateTask(input, from);
+export async function createTask(input: Pick<Task, "title" | "due" | "priority" | "assignee">, from?: Pick<Task, "source" | "href">, opts?: WriteOptions): Promise<Task> {
+  if (await isLiveOrg()) return liveCreateTask(input, from, opts);
   const t: Task = { id: `t${Date.now()}${Math.random().toString(36).slice(2, 6)}`, source: "Manual", status: "open", href: "/tasks", ...input, ...from };
   const s = await writableStore();
   s.tasks.unshift(t);
@@ -467,13 +468,28 @@ function liveBrief(s: Store, posts: SocialPostView[]): OrchestratorBrief {
 
 /* ---------- Creating customers and retailers (live organisations only: the demo has no create form) ---------- */
 
-export async function createCustomer(input: CustomerInput): Promise<Customer | null> {
-  return (await isLiveOrg()) ? liveCreateCustomer(input) : null;
+export async function createCustomer(input: CustomerInput, opts?: WriteOptions): Promise<Customer | null> {
+  return (await isLiveOrg()) ? liveCreateCustomer(input, opts) : null;
+}
+
+/** Edit a customer (live organisations only). null when the customer is not found or in demo mode. */
+export async function updateCustomer(id: string, input: CustomerInput): Promise<Customer | null> {
+  return (await isLiveOrg()) ? liveUpdateCustomer(id, input) : null;
+}
+
+/** Edit a retailer's details (live organisations only). Its pipeline stage and score are untouched. */
+export async function updateRetailer(id: string, input: RetailerInput): Promise<Retailer | null> {
+  return (await isLiveOrg()) ? liveUpdateRetailer(id, input) : null;
+}
+
+/** One activity line after a CSV import. */
+export async function logImport(resource: string, created: number): Promise<void> {
+  if (await isLiveOrg()) await liveImportLog(resource, created);
 }
 
 /** Creates the retailer and its first lead in the pipeline. Returns null in demo mode, where the sample data is read-only. */
-export async function createRetailer(input: RetailerInput): Promise<Retailer | null> {
-  return (await isLiveOrg()) ? liveCreateRetailer(input) : null;
+export async function createRetailer(input: RetailerInput, opts?: WriteOptions): Promise<Retailer | null> {
+  return (await isLiveOrg()) ? liveCreateRetailer(input, opts) : null;
 }
 
 /** The pipeline funnel for a live organisation, counted from its real leads (lost leads are not part of the funnel). */
@@ -497,5 +513,5 @@ export async function updateProduct(id: string, input: ProductInput): Promise<Pr
 
 export async function getOrders(): Promise<Order[]> { await tick(); return (await isLiveOrg()) ? liveOrders() : []; }
 export async function getOrder(id: string): Promise<Order | null> { await tick(); return (await isLiveOrg()) ? liveOrder(id) : null; }
-export async function createOrder(input: OrderInput): Promise<Order | null> { return (await isLiveOrg()) ? liveCreateOrder(input) : null; }
+export async function createOrder(input: OrderInput, opts?: WriteOptions): Promise<Order | null> { return (await isLiveOrg()) ? liveCreateOrder(input, opts) : null; }
 export async function updateOrderStatus(id: string, status: OrderStatus): Promise<Order | null> { return (await isLiveOrg()) ? liveUpdateOrderStatus(id, status) : null; }

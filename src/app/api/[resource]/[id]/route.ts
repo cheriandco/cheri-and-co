@@ -1,7 +1,7 @@
 import { deny, errorResponse } from "@/lib/auth/access";
 import { NextResponse } from "next/server";
 import * as s from "@/services";
-import { isOrderStatus, isStage, parseProductInput, readJson, str } from "@/lib/validate";
+import { isOrderStatus, isStage, parseCustomerInput, parseProductInput, parseRetailerInput, readJson, str } from "@/lib/validate";
 
 type Ctx = { params: Promise<{ resource: string; id: string }> };
 
@@ -48,6 +48,23 @@ export async function PATCH(req: Request, ctx: Ctx) {
     try {
       const task = await s.updateTask(id, { status, due: str(body.due, 60) ?? undefined, assignee: str(body.assignee, 60) ?? undefined });
       return task ? NextResponse.json(task) : NextResponse.json({ error: "Not found" }, { status: 404 });
+    } catch (e) { return errorResponse(e); }
+  }
+  // Editing sends every editable field (the form always does), so a blank value clears the field. The lead's stage and score are not touched.
+  if (resource === "customers") {
+    const input = parseCustomerInput(body);
+    if (!input) return NextResponse.json({ error: "Invalid customer" }, { status: 400 });
+    try {
+      const customer = await s.updateCustomer(id, input);
+      return customer ? NextResponse.json(customer) : NextResponse.json({ error: "Not found" }, { status: 404 });
+    } catch (e) { return errorResponse(e); }
+  }
+  if (resource === "retailers") {
+    const input = parseRetailerInput(body);
+    if (!input) return NextResponse.json({ error: "Invalid retailer" }, { status: 400 });
+    try {
+      const retailer = await s.updateRetailer(id, input);
+      return retailer ? NextResponse.json(retailer) : NextResponse.json({ error: "Not found" }, { status: 404 });
     } catch (e) { return errorResponse(e); }
   }
   if (resource === "pipeline" || resource === "leads") {
