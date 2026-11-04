@@ -126,7 +126,7 @@ describe("sample data never reaches a live organisation", () => {
     const b = await getOrchestratorBrief();
     expect(b.totals).toEqual({ pending: 1, openTasks: 1, hotLeads: 0 });
     expect(b.agents.find((a) => a.key === "b2b")!.headline).toMatch(/0 hot leads, 0 retailers/);
-    expect(b.agents.find((a) => a.key === "b2c")!.headline).toMatch(/Not connected/);
+    expect(b.agents.find((a) => a.key === "b2c")!.headline).toMatch(/0 customer follow-up opportunities/);
     expect(JSON.stringify(b)).not.toMatch(/SAMPLE|Aurelia|Moonlit/);
   });
   it("writes that are not connected yet fail instead of touching the sample store", async () => {

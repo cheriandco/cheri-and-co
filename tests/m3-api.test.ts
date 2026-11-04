@@ -152,8 +152,8 @@ describe("M3: B2B follow-up reaches Approvals in a live organisation", () => {
     expect(writes().filter((c) => c.table === "approvals" || c.table === "agent_activity")).toHaveLength(0);
   });
 
-  it("B2C and Amazon stay refused for a live organisation with a clear message, and write nothing", async () => {
-    for (const agent of ["b2c", "amazon"]) {
+  it("Amazon stays refused for a live organisation with a clear message, and writes nothing", async () => {
+    for (const agent of ["amazon"]) {
       const res = await queue({ agent, ref: "anything" });
       expect(res.status).toBe(404);
       expect(((await res.json()) as { error: string }).error).toMatch(/not connected to a data source/i);

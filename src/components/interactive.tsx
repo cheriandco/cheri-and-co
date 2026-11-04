@@ -90,6 +90,7 @@ export function ApprovalQueue({ initial, compact }: { initial: Approval[]; compa
                 <span className="badge info">AI-generated draft</span>
                 <span className={`badge ${a.meta.isSample ? "champagne" : "plain"}`}>{a.meta.isSample ? "SAMPLE data · not client-verified" : "Client record"}</span>
                 <span className="badge plain">Not published</span>
+                {a.meta.kind === "b2c_followup" && <span className="badge danger">Consent not recorded — verify permission before contacting.</span>}
               </div>
             )}
             <p className="preview" style={a.meta ? { whiteSpace: "pre-wrap" } : undefined}>{a.preview}</p>

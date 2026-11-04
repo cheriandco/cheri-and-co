@@ -14,7 +14,7 @@ import { AGENT_NAMES, STAGE_LABELS } from "@/lib/agents";
 import { renderDraft } from "@/lib/content-agent/render";
 import type { CustomerInput, OrderInput, ProductInput, RetailerInput } from "@/lib/validate";
 import {
-  liveCreateCustomer, liveCreateProduct, liveCreateRetailer, liveImportLog, liveQueueB2bFollowUp, liveActionLinks, liveUpdateCustomer, liveUpdateRetailer, liveCreateSocialPost, liveCreateTask, liveCustomer, liveCustomers, liveDecideApproval,
+  liveCreateCustomer, liveCreateProduct, liveCreateRetailer, liveImportLog, liveQueueB2bFollowUp, liveQueueB2cFollowUp, liveB2cOpportunities, liveActionLinks, liveUpdateCustomer, liveUpdateRetailer, liveCreateSocialPost, liveCreateTask, liveCustomer, liveCustomers, liveDecideApproval,
   liveCreateOrder, liveMoveDeal, liveSalesReport, liveOrder, liveOrders, liveProduct, liveProducts, liveSocialPosts, liveSubmitSocialPost, liveUpdateOrderStatus, liveUpdateProduct, liveUpdateSocialPost, liveUpdateTask,
 } from "./live";
 import type { WriteOptions } from "./live";
@@ -132,7 +132,7 @@ export async function decideApproval(
   const a = store.approvals.find((x) => x.id === id);
   if (!a) return { ok: false, reason: "not_found" };
   if (a.status !== "pending") return { ok: false, reason: "not_pending" };
-  if (action === "approve" && (a.meta?.kind === "content_draft" || a.meta?.kind === "b2b_followup")) {
+  if (action === "approve" && (a.meta?.kind === "content_draft" || a.meta?.kind === "b2b_followup" || a.meta?.kind === "b2c_followup")) {
     const violations = findProhibitedClaims(a.preview, a.meta.allowedClaims);
     if (violations.length) return { ok: false, reason: "prohibited_claims", detail: violations.map((v) => `${v.label}: "${v.match}"`) };
   }
@@ -316,14 +316,14 @@ export async function getSearchIndex() {
 export type QueueAgent = "b2c" | "b2b" | "amazon";
 export type QueueResult =
   | { ok: true; approval: Approval }
-  | { ok: false; reason: "not_found" | "already_queued" | "prohibited_claims"; error: string };
+  | { ok: false; reason: "not_found" | "already_queued" | "prohibited_claims" | "not_eligible"; error: string };
 
 /** The text is always rebuilt on the server from the sample records; the browser only names the record. */
 export async function queueAgentAction(agent: QueueAgent, ref: string): Promise<QueueResult> {
   if (await isLiveOrg()) {
-    // Only B2B has real records behind it. B2C conversations and Amazon rows have no live source yet, so they stay refused (never invented).
-    if (agent !== "b2b") return { ok: false, reason: "not_found", error: `${agent === "b2c" ? "Instagram replies" : "Amazon suggestions"} are not connected to a data source yet, so nothing can be queued.` };
-    const r = await liveQueueB2bFollowUp(ref);
+    // B2B (retailers) and B2C (customers and their orders) have real records behind them. Amazon has no live source yet, so it stays refused (never invented).
+    if (agent === "amazon") return { ok: false, reason: "not_found", error: "Amazon suggestions are not connected to a data source yet, so nothing can be queued." };
+    const r = agent === "b2c" ? await liveQueueB2cFollowUp(ref) : await liveQueueB2bFollowUp(ref);
     if (r.ok) return r;
     return { ok: false, reason: r.reason, error: r.detail?.length ? `${r.error} ${r.detail.join("; ")}` : r.error };
   }
@@ -351,6 +351,12 @@ export async function queueAgentAction(agent: QueueAgent, ref: string): Promise<
   s.links[key] = approval.id;
   logActivity(s, { actor: AGENT_NAMES[agent], text: log, agent, ref: agent === "b2b" ? ref : undefined });
   return { ok: true, approval };
+}
+
+/** Live organisations only: B2C opportunities from the saved customers and orders. The sample demo has none (it uses sample conversations). */
+export async function getB2cOpportunities() {
+  await tick();
+  return (await isLiveOrg()) ? liveB2cOpportunities() : [];
 }
 
 /** For each "agent:ref" this visitor has queued: the approval and its current decision. */
@@ -429,7 +435,10 @@ export interface OrchestratorBrief {
 export async function getOrchestratorBrief(): Promise<OrchestratorBrief> {
   await tick();
   const s = await readStore();
-  if (await isLiveOrg()) return liveBrief(s, await liveSocialPosts());
+  if (await isLiveOrg()) {
+    const opps = await liveB2cOpportunities().then((o) => o.length, () => null); // a failure here must not take the dashboard down
+    return liveBrief(s, await liveSocialPosts(), opps);
+  }
   const pending = (k: AgentKey) => s.approvals.filter((a) => a.status === "pending" && a.generatedBy === k).length;
   const hot = s.retailers.filter((r) => r.temperature === "HOT").length;
   const open = s.tasks.filter((t) => t.status === "open").length;
@@ -453,7 +462,7 @@ export async function getOrchestratorBrief(): Promise<OrchestratorBrief> {
 
 /** What the orchestrator can honestly say for a live organisation: approvals and tasks come from the database, and
  *  every other agent says it is not connected yet instead of quoting sample numbers. */
-function liveBrief(s: Store, posts: SocialPostView[]): OrchestratorBrief {
+function liveBrief(s: Store, posts: SocialPostView[], b2cOpportunities: number | null): OrchestratorBrief {
   const pending = (k: AgentKey) => s.approvals.filter((a) => a.status === "pending" && a.generatedBy === k).length;
   const open = s.tasks.filter((t) => t.status === "open").length;
   const hot = s.retailers.filter((r) => r.temperature === "HOT").length;
@@ -462,6 +471,7 @@ function liveBrief(s: Store, posts: SocialPostView[]): OrchestratorBrief {
   const headline = (key: AgentKey) =>
     key === "crm" ? `${open} open task${open === 1 ? "" : "s"}, ${negotiating} deal${negotiating === 1 ? "" : "s"} in negotiation`
     : key === "b2b" ? `${hot} hot lead${hot === 1 ? "" : "s"}, ${s.retailers.length} retailer${s.retailers.length === 1 ? "" : "s"} tracked`
+    : key === "b2c" ? (b2cOpportunities === null ? "Customer opportunities are unavailable right now" : `${b2cOpportunities} customer follow-up opportunit${b2cOpportunities === 1 ? "y" : "ies"} to review`)
     : key === "content" ? `${posts.length} planned post${posts.length === 1 ? "" : "s"}, ${pending("content")} awaiting approval`
     : "Not connected to the database yet";
   const agents = (Object.keys(hrefs) as AgentKey[]).map((key) => ({ key, name: AGENT_NAMES[key], href: hrefs[key], pending: pending(key), headline: headline(key) }));

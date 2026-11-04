@@ -8,6 +8,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { findProhibitedClaims } from "@/lib/content-agent/claims";
 import { renderPostForApproval, toView } from "@/lib/social/posts";
 import { liveFollowUpDraft } from "@/lib/agent-logic";
+import { b2cFollowUpDraft, findOpportunities, type Opportunity } from "@/lib/b2c-opportunities";
 import type { CustomerInput, OrderInput, ProductInput, RetailerInput } from "@/lib/validate";
 import type { Activity, AgentKey, Approval, ApprovalStatus, AuditEntry, Customer, Deal, Order, OrderStatus, PipelineStage, Product, Retailer, Task } from "@/types";
 import type { ReportSection } from "@/types";
@@ -131,7 +132,7 @@ export async function liveDecideApproval(id: string, action: "approve" | "reject
   if (action === "approve") {
     const { data } = await supabase.from("approvals").select("preview, meta").eq("org_id", orgId).eq("id", id).maybeSingle();
     const row = data as { preview: string; meta: { kind?: string; allowedClaims?: string[] } | null } | null;
-    if (row?.meta?.kind === "content_draft" || row?.meta?.kind === "b2b_followup") {
+    if (row?.meta?.kind === "content_draft" || row?.meta?.kind === "b2b_followup" || row?.meta?.kind === "b2c_followup") {
       const violations = findProhibitedClaims(row.preview, row.meta.allowedClaims ?? []);
       if (violations.length) return { ok: false, reason: "prohibited_claims", detail: violations.map((v) => `${v.label}: "${v.match}"`) };
     }
@@ -474,7 +475,7 @@ async function undoSubmit(supabase: Awaited<ReturnType<typeof ctx>>["supabase"],
 
 export type LiveQueueResult =
   | { ok: true; approval: Approval }
-  | { ok: false; reason: "not_found" | "already_queued" | "prohibited_claims"; error: string; detail?: string[] };
+  | { ok: false; reason: "not_found" | "already_queued" | "prohibited_claims" | "not_eligible"; error: string; detail?: string[] };
 
 /** Queues a plain template follow-up email for one of this organisation's retailers as a pending approval.
  *  Nothing is sent. The text is built here from the saved record (the browser only names the retailer), the claim guard runs
@@ -508,6 +509,45 @@ export async function liveQueueB2bFollowUp(ref: string): Promise<LiveQueueResult
   return { ok: true, approval: toApproval(made.data as ApprovalRow) };
 }
 
+/** B2C sales opportunities for the organisation, from its saved customers and orders (rules in src/lib/b2c-opportunities.ts). */
+export async function liveB2cOpportunities(now: Date = new Date()): Promise<Opportunity[]> {
+  const [customers, orders] = await Promise.all([liveCustomers(), liveOrders()]);
+  return findOpportunities(customers, orders, now);
+}
+
+/** Queues a generic follow-up draft for one customer as a pending approval. Nothing is sent. The browser names only the customer;
+ *  the opportunity is recomputed here from the saved orders, so a customer with no current opportunity, with no usable contact
+ *  or whose latest order was returned or cancelled is refused. Consent is not recorded anywhere: approval is never proof of it. */
+export async function liveQueueB2cFollowUp(ref: string, now: Date = new Date()): Promise<LiveQueueResult> {
+  if (!UUID.test(ref)) return { ok: false, reason: "not_found", error: "Customer not found." };
+  const { supabase, orgId } = await ctx();
+  const found = await supabase.from("customers").select(CUSTOMER_COLS).eq("org_id", orgId).eq("id", ref).maybeSingle();
+  if (found.error) fail(found.error);
+  if (!found.data) return { ok: false, reason: "not_found", error: "Customer not found." };
+  const customer = toCustomer(found.data as CustomerRow, 0);
+  const rows = await allRows<OrderRow>((from, to) => supabase.from("orders").select(ORDER_COLS).eq("org_id", orgId).eq("customer_id", ref)
+    .order("ordered_at", { ascending: false }).order("id").range(from, to));
+  const opp = findOpportunities([customer], rows.map(toOrder), now)[0];
+  if (!opp) return { ok: false, reason: "not_eligible", error: "No follow-up is suggested for this customer right now." };
+  if (opp.kind === "review_returned") return { ok: false, reason: "not_eligible", error: "This customer's latest order was returned or cancelled. A person should review it; no sales message is drafted." };
+  if (!opp.draftable) return { ok: false, reason: "not_eligible", error: "This customer has no usable email or phone, so there is nothing to follow up with. Add contact details first." };
+
+  const draft = b2cFollowUpDraft(customer, opp);
+  const violations = findProhibitedClaims(draft.preview, []);
+  if (violations.length) {
+    return { ok: false, reason: "prohibited_claims", error: "The draft contains wording that needs client-approved claims.", detail: violations.map((v) => `${v.label}: "${v.match}"`) };
+  }
+  if ((await pendingAgentActions(supabase, orgId)).has(`b2c:${ref}`)) return { ok: false, reason: "already_queued", error: "This is already waiting in Approvals." };
+
+  const made = await supabase.from("approvals").insert({
+    org_id: orgId, title: draft.title, type: "B2C Follow-up", generated_by: "b2c", status: "pending", preview: draft.preview,
+    meta: { kind: "b2c_followup", subject: customer.name, isSample: false, allowedClaims: [], agent: "b2c", ref, opportunity: opp.kind, orderId: opp.orderId, consentRecorded: false },
+  }).select("id, title, type, generated_by, status, preview, meta, created_at").single();
+  if (made.error || !made.data) fail(made.error ?? { message: "Database request failed" });
+  await liveLog({ agent: "b2c", action: `Drafted a follow-up for ${customer.name} (${opp.kind.replace(/_/g, " ")}) and sent it for approval (not sent to the customer)` });
+  return { ok: true, approval: toApproval(made.data as ApprovalRow) };
+}
+
 /** "agent:ref" keys that already have a pending approval. */
 async function pendingAgentActions(supabase: Awaited<ReturnType<typeof ctx>>["supabase"], orgId: string): Promise<Map<string, string>> {
   const rows = await allRows<ApprovalRow>((from, to) => supabase.from("approvals").select("id, title, type, generated_by, status, preview, meta, created_at")
@@ -515,7 +555,7 @@ async function pendingAgentActions(supabase: Awaited<ReturnType<typeof ctx>>["su
   const out = new Map<string, string>();
   for (const r of rows) {
     const m = r.meta as { kind?: string; agent?: string; ref?: string } | null;
-    if (m?.kind === "b2b_followup" && m.agent && m.ref) out.set(`${m.agent}:${m.ref}`, r.id);
+    if ((m?.kind === "b2b_followup" || m?.kind === "b2c_followup") && m.agent && m.ref) out.set(`${m.agent}:${m.ref}`, r.id);
   }
   return out;
 }
@@ -526,7 +566,7 @@ export async function liveActionLinks(): Promise<Record<string, { approvalId: st
   const out: Record<string, { approvalId: string; status: Approval["status"] }> = {};
   for (const a of approvals) {
     const m = a.meta;
-    if (m?.kind === "b2b_followup" && m.agent && m.ref) {
+    if ((m?.kind === "b2c_followup" || m?.kind === "b2b_followup") && m.agent && m.ref) {
       const key = `${m.agent}:${m.ref}`;
       if (!out[key]) out[key] = { approvalId: a.id, status: a.status };
     }
