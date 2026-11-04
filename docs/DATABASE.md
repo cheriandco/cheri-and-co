@@ -3,7 +3,7 @@
 **Status: DRAFT.** Update (feature branch `feature/supabase-foundation`, not on `main`): a Supabase schema now exists in
 `supabase/migrations/20261101000000_foundation.sql` (13 tables: `organizations`, `profiles`, `memberships`, `customers`, `products`, `retailers`,
 `leads`, `orders`, `tasks`, `approvals`, `content_items`, `agent_activity`, `audit_log`, all with Row Level Security) and a real (non-demo)
-organisation reads and writes them when `AUTH_MODE=required`. That schema is described in `docs/SUPABASE_SETUP.md`. There are **no tables** for conversations, messages or
+organisation reads and writes them when `AUTH_MODE=required`. That schema is described in `docs/SUPABASE_SETUP.md`. A second, prepared (not yet applied) migration `supabase/migrations/20261104000000_security_hardening.sql` adds no tables or columns: it adds the claim rules in SQL (`private.find_prohibited_claims`), the functions `submit_content()` and `reopen_content()`, a stricter `decide_approval()`, two guard triggers on `content_items` and `approvals`, and a tighter insert policy on `content_items` (`docs/SECURITY_HARDENING_REPORT.md`). There are **no tables** for conversations, messages or
 Amazon data (B2C Sales and Amazon Intelligence have no live data source). The rest of this document describes the **sample data layer** (in-memory, the public demo and demo
 organisations) and what is still undecided. It is **not** an approved schema; do not add tables from it until the open questions below are answered by the client.
 

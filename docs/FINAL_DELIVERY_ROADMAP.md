@@ -7,6 +7,8 @@ answered from the repository is marked **UNVERIFIED**.
 
 Companion document: `docs/APP_DEPLOYMENT_PREPARATION.md` (hosting, domain, environment, Supabase, staged checks, final decisions).
 
+**Update (M0, M1 and security hardening prepared; nothing applied or committed):** `docs/CLIENT_SCOPE_SIGNOFF.md` is a DRAFT awaiting the client's written approval (M0 is **not** complete). `docs/STAGING_SETUP_AND_VERIFICATION.md` and `docs/security_hardening_live_check.sql` prepare M1; **no staging project exists, so M1 is not complete and no hosted test has run.** The two security issues are implemented in `supabase/migrations/20261104000000_security_hardening.sql` and tested in-process (`docs/SECURITY_HARDENING_REPORT.md`); the migration is not applied to any Supabase project. No estimate in section F was changed.
+
 Classification labels used below:
 **DEMO** implemented and working in demo (sample data) · **LIVE** connected to the live database · **NOT-INTEGRATED** implemented but not wired to live data ·
 **MISSING** not implemented · **ACCESS** needs a client account or API access · **DECISION** needs a client decision.
@@ -161,7 +163,7 @@ cross-organisation isolation are proven by automated suites and SQL fixtures (de
 
 | Item | Acceptance criteria |
 |---|---|
-| M1 | Real sign-in succeeds and lands on the dashboard; wrong password gives the generic error; the PostgREST filters used by Slices 1 to 4 return correct rows on staging; duplicate SKU gives 409; cross-organisation link refused; content submit creates an approval, `decide_approval()` updates the post; `rls_live_check.sql` all PASS on staging; Security Advisor clean. |
+| M1 | Real sign-in succeeds and lands on the dashboard; wrong password gives the generic error; the PostgREST filters used by Slices 1 to 4 return correct rows on staging; duplicate SKU gives 409; cross-organisation link refused; content submit creates an approval, `decide_approval()` updates the post; `rls_live_check.sql` and `security_hardening_live_check.sql` all PASS on staging (the latter needs the hardening migration applied to staging first); Security Advisor clean. |
 | M2 | A non-technical user creates a customer, retailer, task and order from the screen; invalid input shows a message; viewer is refused; CSV with a bad row reports the row and imports nothing partially. |
 | M3 | A B2C, B2B or Amazon suggestion appears in Approvals with the real submitter; duplicates are refused; a decision writes an audit row; nothing is sent or changed externally. |
 | M4 | A staff member enters an enquiry; the draft, intent and escalation reason appear; order-status, refund and complaint enquiries escalate; the draft never states an unverified price, stock or claim; "Submit for approval" creates a pending approval; the conversation persists after refresh; another organisation cannot read it. |
@@ -240,7 +242,7 @@ multi-currency, Amazon Global/UAE/UK/US expansion; mobile apps; MFA and password
 
 ## Appendix 3: Slices 1 to 4 review
 
-**What the tests prove.** (Counts below are from before the sprint; the suite now has 312 tests.) `tests/live-data.test.ts` (about 79 test cases, recording fake Supabase client) proves application logic: every query is scoped to the
+**What the tests prove.** (Counts below are from before the sprint; the suite now has 382 tests.) `tests/live-data.test.ts` (about 79 test cases, recording fake Supabase client) proves application logic: every query is scoped to the
 session's organisation, roles are enforced per route (viewer 403), validators reject bad input, mappers fall back safely, demo/live separation, and the
 business rules for purchases and revenue. `tests/rls.test.ts` (about 36 cases) runs the real migration in an in-process Postgres and proves policy behaviour, composite keys,
 append-only audit and `decide_approval()`. `tests/auth.test.ts` (about 23, fake client) proves guards and redirects. Agent tests (B2C, Content, Social, demo isolation) prove

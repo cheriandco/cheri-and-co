@@ -10,6 +10,8 @@ const h = vi.hoisted(() => ({
   calls: [] as { table: string; op: string; eq: Record<string, unknown>; payload?: Record<string, unknown>; range?: [number, number] }[],
   rpcCalls: [] as { fn: string; args: Record<string, unknown> }[],
   rpcResult: { data: null, error: null } as { data: unknown; error: { code?: string; message: string } | null },
+  /** A result (or a function that also changes the fake tables) for one named database function. */
+  rpcByFn: {} as Record<string, { data: unknown; error: { code?: string; message: string } | null } | ((args: Record<string, unknown>) => { data: unknown; error: { code?: string; message: string } | null })>,
   insertError: null as { code?: string; message: string } | null,
   /** Makes a matching update fail with an error, or match no rows when it returns "empty". */
   /** Emulates the API's max-rows setting (1000 by default): no response carries more rows than this, whatever the query asks for. */
@@ -20,7 +22,7 @@ const h = vi.hoisted(() => ({
 vi.mock("@/lib/supabase/server", () => ({
   createSupabaseServerClient: async () => ({
     auth: { getUser: async () => ({ data: { user: { id: "u1", email: "u1@test.invalid" } }, error: null }) },
-    rpc: async (fn: string, args: Record<string, unknown>) => { h.rpcCalls.push({ fn, args }); return h.rpcResult; },
+    rpc: async (fn: string, args: Record<string, unknown>) => { h.rpcCalls.push({ fn, args }); const r = h.rpcByFn[fn]; return typeof r === "function" ? r(args) : (r ?? h.rpcResult); },
     from: (table: string) => {
       const call: Call = { table, op: "select", eq: {} };
       h.calls.push(call);
@@ -75,7 +77,7 @@ beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.invalid");
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon-test");
   h.calls.length = 0; h.rpcCalls.length = 0; h.insertError = null; h.updateFault = null; h.maxRows = 1000;
-  h.rpcResult = { data: null, error: null };
+  h.rpcResult = { data: null, error: null }; h.rpcByFn = {};
   h.tables = {
     tasks: [{ id: "t1", org_id: ORG, title: "Call Asha", source: "CRM & Sales Ops Agent", due_at: null, priority: "high", status: "open", assignee_id: null, related_ref: null },
             { id: "t2", org_id: "other-org", title: "Not mine", source: "Manual", due_at: null, priority: "low", status: "open", assignee_id: null, related_ref: null }],
@@ -201,6 +203,47 @@ describe("live approval decisions", () => {
     const res = await decideApproval("a9", "approve", "x");
     expect(res).toMatchObject({ ok: false, reason: "prohibited_claims" });
     expect(h.rpcCalls).toEqual([]);
+  });
+  it("a list of allowed claims stored in the approval's metadata is ignored (users can write it), so it unlocks nothing", async () => {
+    h.tables.approvals = [{ id: "a9", org_id: ORG, title: "Post", type: "Content", generated_by: "content", status: "pending",
+      preview: "Waterproof and anti-tarnish", meta: { kind: "content_draft", allowedClaims: ["waterproof", "anti-tarnish"] }, created_at: new Date().toISOString() }];
+    expect(await decideApproval("a9", "approve", "x")).toMatchObject({ ok: false, reason: "prohibited_claims" });
+    expect(h.rpcCalls).toEqual([]);
+  });
+  it("a content approval is checked even when its metadata does not say so (type or generator is enough)", async () => {
+    h.tables.approvals = [{ id: "a9", org_id: ORG, title: "Post", type: "Content", generated_by: "content", status: "pending", preview: "Only ₹499", meta: null, created_at: new Date().toISOString() }];
+    expect(await decideApproval("a9", "approve", "x")).toMatchObject({ ok: false, reason: "prohibited_claims" });
+  });
+  it("a refusal from the database (a direct or racing call) is reported as prohibited claims with its details, not as a crash", async () => {
+    h.rpcResult = { data: null, error: { code: "23514", message: 'prohibited claims: price: "₹499" | discount or offer: "sale"' } };
+    expect(await decideApproval("a1", "approve", "x")).toEqual({ ok: false, reason: "prohibited_claims", detail: ['price: "₹499"', 'discount or offer: "sale"'] });
+  });
+  it("F4: editing the approval of a post is refused by the database and reported as a conflict with a plain message, not as a crash", async () => {
+    h.rpcResult = { data: null, error: { code: "P0001", message: "a content approval cannot be edited; reject it and change the post instead" } };
+    expect(await decideApproval("a1", "edit", "x", undefined, { preview: "new text" })).toEqual({ ok: false, reason: "not_editable" });
+    const res = await (await import("@/app/api/approvals/[id]/[action]/route")).POST(
+      new Request("https://app.test/api/approvals/a1/edit", { method: "POST", headers: { "content-type": "application/json", origin: "https://app.test" }, body: JSON.stringify({ preview: "new text" }) }),
+      { params: Promise.resolve({ id: "a1", action: "edit" }) });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toMatch(/cannot be edited/);
+  });
+  it("F6: the approval's title is scanned by the early check as well", async () => {
+    h.tables.approvals = [{ id: "a9", org_id: ORG, title: "Real gold sale", type: "Content", generated_by: "content", status: "pending", preview: "Caption: a calm look", meta: null, created_at: new Date().toISOString() }];
+    expect(await decideApproval("a9", "approve", "x")).toMatchObject({ ok: false, reason: "prohibited_claims" });
+    expect(h.rpcCalls).toEqual([]);
+  });
+  it("F1: a look-alike spelling is caught by the early check too (no-break space in a price, zero-width character in a claim)", async () => {
+    const nbsp = String.fromCodePoint(0xa0);
+    const zwsp = String.fromCodePoint(0x200b);
+    for (const preview of [`Only ₹${nbsp}499`, `water${zwsp}proof`]) {
+      h.tables.approvals = [{ id: "a9", org_id: ORG, title: "Post", type: "Content", generated_by: "content", status: "pending", preview, meta: null, created_at: new Date().toISOString() }];
+      expect(await decideApproval("a9", "approve", "x"), preview).toMatchObject({ ok: false, reason: "prohibited_claims" });
+    }
+  });
+  it("non-content approvals with a price in them are not blocked by the early check", async () => {
+    h.rpcResult = { data: { id: "a1", title: "Reply", type: "Instagram reply", generated_by: "b2c", status: "approved", preview: "It is ₹499", meta: null, created_at: new Date().toISOString() }, error: null };
+    h.tables.approvals = [{ id: "a1", org_id: ORG, title: "Reply", type: "Instagram reply", generated_by: "b2c", status: "pending", preview: "It is ₹499, 50% off", meta: null, created_at: new Date().toISOString() }];
+    expect(await decideApproval("a1", "approve", "x")).toMatchObject({ ok: true });
   });
 });
 
@@ -501,31 +544,85 @@ describe("slice 3: live content calendar and approval workflow", () => {
     expect((await postSocial(jreq("POST", "https://app.test/api/social/posts", { title: "x", platform: "TikTok" }))).status).toBe(400);
     expect(h.calls.filter((c) => c.op === "insert")).toEqual([]);
   });
-  it("edits a draft (and resets it to a draft with no approval); refuses pending or foreign posts", async () => {
+  it("edits a draft by updating its wording only (the status and approval link are never written by the app); refuses pending or foreign posts", async () => {
     h.calls.length = 0;
     const res = await postAction(POST1, "edit", { title: "Renamed", platform: "Instagram", caption: "New caption" });
     expect(res.status).toBe(200);
     const upd = h.calls.find((c) => c.table === "content_items" && c.op === "update")!;
     expect(upd.eq).toMatchObject({ org_id: ORG, id: POST1 });
-    expect(upd.payload).toMatchObject({ title: "Renamed", status: "draft", approval_id: null });
+    expect(upd.payload).toMatchObject({ title: "Renamed" });
+    expect(upd.payload).not.toHaveProperty("status");
+    expect(upd.payload).not.toHaveProperty("approval_id");
+    expect(h.rpcCalls).toEqual([]); // a draft needs no reopening
     h.tables.approvals = h.tables.approvals!.map((a) => (a.id === APPROVAL_ID ? { ...a, status: "pending" } : a));
     expect((await postAction(POST_PENDING, "edit", { title: "x", platform: "Instagram" })).status).toBe(409);
     expect((await postAction(POST_OTHER, "edit", { title: "x", platform: "Instagram" })).status).toBe(404);
     expect((await postAction(POST1, "edit", { platform: "Instagram" })).status).toBe(400);
   });
-  it("submitting claims the draft, queues a pending approval and links it; nothing is published", async () => {
+  it("editing a rejected post reopens it through reopen_content first; the database decides whether that is allowed", async () => {
+    h.tables.content_items = [contentRow({ status: "rejected", approval_id: APPROVAL_ID })];
+    h.tables.approvals = [{ id: APPROVAL_ID, org_id: ORG, title: "t", type: "Content", generated_by: "content", status: "rejected", preview: "x", meta: { kind: "content_draft", postId: POST1 }, created_at: stamp }];
+    h.calls.length = 0;
+    expect((await postAction(POST1, "edit", { title: "Reworded", platform: "Instagram", caption: "Softer" })).status).toBe(200);
+    expect(h.rpcCalls).toEqual([{ fn: "reopen_content", args: { p_post: POST1 } }]);
+    const upd = h.calls.find((c) => c.table === "content_items" && c.op === "update")!;
+    expect(upd.payload).not.toHaveProperty("status");
+    expect(upd.payload).not.toHaveProperty("approval_id");
+    h.rpcByFn.reopen_content = { data: null, error: { code: "42501", message: "not authorized" } };
+    h.calls.length = 0;
+    expect((await postAction(POST1, "edit", { title: "x", platform: "Instagram" })).status).toBe(403);
+    expect(h.calls.some((c) => c.op === "update")).toBe(false); // nothing is edited when the reopening is refused
+    h.rpcByFn.reopen_content = { data: null, error: { code: "P0001", message: "this post is waiting for a decision" } };
+    expect((await postAction(POST1, "edit", { title: "x", platform: "Instagram" })).status).toBe(409);
+    h.rpcByFn.reopen_content = { data: null, error: { code: "P0002", message: "not found" } };
+    expect((await postAction(POST1, "edit", { title: "x", platform: "Instagram" })).status).toBe(404);
+  });
+  const submitOk = () => { h.rpcByFn.submit_content = (args) => {
+    h.tables.content_items = h.tables.content_items!.map((r) => (r.id === args.p_post ? { ...r, status: "pending_approval", approval_id: "new-approval-1" } : r));
+    return { data: "new-approval-1", error: null };
+  }; };
+  it("submitting is ONE database call (submit_content); the app writes no status, no approval and no link itself; nothing is published", async () => {
+    submitOk();
     h.calls.length = 0;
     const res = await postAction(POST1, "submit");
     expect(res.status).toBe(200);
-    const writes = h.calls.filter((c) => c.op !== "select").map((c) => `${c.table}:${c.op}`);
-    expect(writes.slice(0, 3)).toEqual(["content_items:update", "approvals:insert", "content_items:update"]);
-    const claim = h.calls.find((c) => c.table === "content_items" && c.op === "update")!;
-    expect(claim.eq).toMatchObject({ org_id: ORG, id: POST1, status: "draft" });
-    expect(claim.payload).toEqual({ status: "pending_approval" });
-    const approval = h.calls.find((c) => c.table === "approvals" && c.op === "insert")!;
-    expect(approval.payload).toMatchObject({ org_id: ORG, type: "Content", generated_by: "content", status: "pending", meta: { kind: "content_draft", isSample: false, allowedClaims: [] } });
-    expect(JSON.stringify(approval.payload)).not.toContain('"status":"published"');
-    expect(((await res.json()) as { data: { status: string } }).data.status).toBe("pending_approval");
+    expect(h.rpcCalls).toEqual([{ fn: "submit_content", args: { p_post: POST1 } }]); // only the post id is sent: the text and metadata are built by the database
+    expect(h.calls.filter((c) => c.op !== "select")).toEqual([]);
+    expect(((await res.json()) as { data: { status: string; approvalId: string } }).data).toMatchObject({ status: "pending_approval", approvalId: "new-approval-1" });
+  });
+  it("the database's refusals are mapped: not found 404, not a draft or no caption 409, prohibited claims 422 with details, no permission 403", async () => {
+    const cases: [string, string, number][] = [["P0002", "not found", 404], ["P0001", "only drafts can be submitted for approval", 409], ["22023", "a caption is required", 409],
+      ["23514", 'prohibited claims: price: "₹499"', 422], ["42501", "not authorized", 403]];
+    for (const [code, message, status] of cases) {
+      h.rpcByFn.submit_content = { data: null, error: { code, message } };
+      expect((await postAction(POST1, "submit")).status, message).toBe(status);
+    }
+    h.rpcByFn.submit_content = { data: null, error: { code: "23514", message: 'prohibited claims: price: "₹499" | stock or scarcity: "hurry"' } };
+    const body = (await (await postAction(POST1, "submit")).json()) as { issues?: string[] };
+    expect(body.issues).toEqual(['price: "₹499"', 'stock or scarcity: "hurry"']);
+  });
+  it("F12: a post too long to send for approval is refused with a clear message before the database is called, and the database's own refusal is mapped the same way", async () => {
+    h.tables.content_items = [contentRow({ hashtags: Array.from({ length: 150 }, (_, i) => `#tag${i}${"x".repeat(40)}`) })];
+    h.rpcCalls.length = 0;
+    const early = await postAction(POST1, "submit");
+    expect(early.status).toBe(409);
+    expect(((await early.json()) as { error: string }).error).toMatch(/too long to send for approval/);
+    expect(h.rpcCalls).toEqual([]);
+    h.tables.content_items = [contentRow({})];
+    h.rpcByFn.submit_content = { data: null, error: { code: "22023", message: "the post is too long to send for approval (limit 6000 characters)" } };
+    const late = await postAction(POST1, "submit");
+    expect(late.status).toBe(409);
+    expect(((await late.json()) as { error: string }).error).toMatch(/too long to send for approval/);
+  });
+  it("F6: prohibited wording in the title or the topic is caught before the database is called", async () => {
+    for (const row of [contentRow({ title: "100% guaranteed waterproof" }), contentRow({ topic: "Lowest price of the year" })]) {
+      h.tables.content_items = [row];
+      h.rpcCalls.length = 0;
+      const res = await postAction(POST1, "submit");
+      expect(res.status).toBe(422);
+      expect(((await res.json()) as { issues?: string[] }).issues?.length).toBeGreaterThan(0);
+      expect(h.rpcCalls).toEqual([]);
+    }
   });
   it("the claim guard blocks a draft with a price or discount before anything is written", async () => {
     h.tables.content_items = [contentRow({ caption: "Flat 50% off today, only 3 left in stock" })];
@@ -534,12 +631,14 @@ describe("slice 3: live content calendar and approval workflow", () => {
     expect(res.status).toBe(422);
     expect(h.calls.filter((c) => c.op !== "select")).toEqual([]);
   });
-  it("refuses to submit an empty caption, a non-draft, or another organisation's post", async () => {
+  it("refuses to submit an empty caption, a non-draft, or another organisation's post, without calling the database", async () => {
     h.tables.content_items = [contentRow({ caption: null }), contentRow({ id: POST_PENDING, status: "pending_approval", approval_id: APPROVAL_ID })];
-    h.tables.approvals = [{ id: APPROVAL_ID, org_id: ORG, title: "t", type: "Content", generated_by: "content", status: "pending", preview: "x", meta: null, created_at: stamp }];
+    h.tables.approvals = [{ id: APPROVAL_ID, org_id: ORG, title: "t", type: "Content", generated_by: "content", status: "pending", preview: "x", meta: { kind: "content_draft", postId: POST_PENDING }, created_at: stamp }];
+    h.rpcCalls.length = 0;
     expect((await postAction(POST1, "submit")).status).toBe(409);
     expect((await postAction(POST_PENDING, "submit")).status).toBe(409);
     expect((await postAction(POST_OTHER, "submit")).status).toBe(404);
+    expect(h.rpcCalls).toEqual([]);
   });
   it("a viewer cannot create, edit or submit posts", async () => {
     setRole("viewer");
@@ -553,14 +652,13 @@ describe("slice 3: live content calendar and approval workflow", () => {
     expect((await postAction(POST_PENDING, "publish")).status).toBe(409);
     expect(h.calls.filter((c) => c.op !== "select")).toEqual([]);
   });
-  it("deciding a content approval keeps the post's stored status in step", async () => {
-    h.tables.approvals = [{ id: APPROVAL_ID, org_id: ORG, title: "t", type: "Content", generated_by: "content", status: "pending", preview: "Soft light everyday stack", meta: { kind: "content_draft", subject: "x", isSample: false, allowedClaims: [] }, created_at: stamp }];
+  it("deciding a content approval is only the decide_approval call; the database moves the post in the same transaction (no separate write)", async () => {
+    h.tables.approvals = [{ id: APPROVAL_ID, org_id: ORG, title: "t", type: "Content", generated_by: "content", status: "pending", preview: "Soft light everyday stack", meta: { kind: "content_draft", subject: "x", isSample: false, allowedClaims: [], postId: POST_PENDING }, created_at: stamp }];
     h.rpcResult = { data: { id: APPROVAL_ID, title: "t", type: "Content", generated_by: "content", status: "rejected", preview: "x", meta: null, created_at: stamp }, error: null };
     h.calls.length = 0;
     expect(await decideApproval(APPROVAL_ID, "reject", "x", "needs work")).toMatchObject({ ok: true });
-    const sync = h.calls.find((c) => c.table === "content_items" && c.op === "update")!;
-    expect(sync.payload).toEqual({ status: "rejected" });
-    expect(sync.eq).toMatchObject({ org_id: ORG, approval_id: APPROVAL_ID });
+    expect(h.rpcCalls.map((c) => c.fn)).toEqual(["decide_approval"]);
+    expect(h.calls.filter((c) => c.table === "content_items" && c.op !== "select")).toEqual([]);
   });
   it("the orchestrator reports real planned-post counts for content", async () => {
     expect((await getOrchestratorBrief()).agents.find((a) => a.key === "content")!.headline).toBe("2 planned posts, 0 awaiting approval");
@@ -574,43 +672,35 @@ describe("slice 3: live content calendar and approval workflow", () => {
   });
 });
 
-describe("slice 3: a submission that cannot be completed", () => {
+describe("slice 3: a submission cannot be left half done", () => {
   beforeEach(seedCatalogue);
-  const linkFault = (fault: { code?: string; message: string } | "empty") => { h.updateFault = (t, payload) => (t === "content_items" && "approval_id" in payload ? fault : null); };
-
-  it("if the approval cannot be linked, the post goes back to a draft and the unlinked approval is rejected through decide_approval", async () => {
-    linkFault({ code: "XX000", message: "boom" });
+  it("a database refusal on submit is a 403 and nothing else is written; any other failure is an error, with no compensating writes", async () => {
+    h.rpcByFn.submit_content = { data: null, error: { code: "42501", message: "new row violates row-level security policy" } };
     h.calls.length = 0;
+    expect((await postAction(POST1, "submit")).status).toBe(403);
+    h.rpcByFn.submit_content = { data: null, error: { code: "XX000", message: "boom" } };
     await expect(postAction(POST1, "submit")).rejects.toBeDefined();
-    const updates = h.calls.filter((c) => c.table === "content_items" && c.op === "update").map((c) => c.payload);
-    expect(updates).toContainEqual({ status: "draft" });
-    expect(h.rpcCalls).toHaveLength(1);
-    expect(h.rpcCalls[0]).toMatchObject({ fn: "decide_approval", args: { p_id: "new-1", p_action: "reject" } });
-    expect(h.calls.some((c) => c.table === "approvals" && (c.op === "update" || c.op === "delete"))).toBe(false); // approvals are never touched directly
+    expect(h.calls.filter((c) => c.op !== "select")).toEqual([]); // the database undoes a failed submission itself; the app has nothing to clean up
+    expect(h.rpcCalls.every((c) => c.fn === "submit_content")).toBe(true);
   });
-  it("a link that matches no row (post removed meanwhile) is a 404, not a false success, and is undone the same way", async () => {
-    linkFault("empty");
-    h.rpcCalls.length = 0;
-    expect((await postAction(POST1, "submit")).status).toBe(404);
-    expect(h.rpcCalls[0]).toMatchObject({ fn: "decide_approval", args: { p_action: "reject" } });
-  });
-  it("a role that may not decide approvals still gets the post back as a draft (the unlinked approval then stays pending)", async () => {
-    linkFault({ code: "XX000", message: "boom" });
-    h.rpcResult = { data: null, error: { code: "42501", message: "not authorized" } };
+  it("no application path writes a post's status or approval link, or inserts an approval for a post, directly", async () => {
+    h.rpcByFn.submit_content = { data: "new-approval-1", error: null };
     h.calls.length = 0;
-    await expect(postAction(POST1, "submit")).rejects.toBeDefined();
-    expect(h.calls.some((c) => c.table === "content_items" && c.op === "update" && c.payload?.status === "draft")).toBe(true);
+    await postAction(POST1, "submit");
+    await postAction(POST1, "edit", { title: "x", platform: "Instagram", caption: "ok" });
+    h.rpcResult = { data: { id: APPROVAL_ID, title: "t", type: "Content", generated_by: "content", status: "approved", preview: "x", meta: null, created_at: stamp }, error: null };
+    await decideApproval(APPROVAL_ID, "approve", "x");
+    expect(h.calls.filter((c) => c.table === "approvals" && c.op !== "select")).toEqual([]);
+    for (const c of h.calls.filter((x) => x.table === "content_items" && x.op === "update")) {
+      expect(c.payload).not.toHaveProperty("status");
+      expect(c.payload).not.toHaveProperty("approval_id");
+    }
   });
-  it("a post stuck at pending approval with no approval behind it shows as a draft and can be edited", async () => {
+  it("a post stuck at pending approval with no approval behind it shows as a draft and can be edited (through reopen_content)", async () => {
     h.tables.content_items = [contentRow({ status: "pending_approval", approval_id: null })];
     expect((await getSocialPosts())[0].status).toBe("draft");
     expect((await postAction(POST1, "edit", { title: "Fixed", platform: "Instagram", caption: "ok" })).status).toBe(200);
-  });
-  it("if claiming the draft is refused by the database, nothing else is written", async () => {
-    h.updateFault = (t, payload) => (t === "content_items" && payload.status === "pending_approval" ? { code: "42501", message: "row-level security" } : null);
-    h.calls.length = 0;
-    expect((await postAction(POST1, "submit")).status).toBe(403);
-    expect(h.calls.some((c) => c.table === "approvals" && c.op === "insert")).toBe(false);
+    expect(h.rpcCalls).toContainEqual({ fn: "reopen_content", args: { p_post: POST1 } });
   });
 });
 
@@ -995,11 +1085,9 @@ describe("a post is approved only when a human approval raised for that very pos
     h.tables.content_items = [contentRow({ id: POST1, status: "approved", approval_id: APPROVAL_ID })];
     expect((await getSocialPosts())[0].status).toBe("draft");
   });
-  it("submitting records the post id in the approval, so the link can be verified later", async () => {
-    h.tables.content_items = [contentRow({})];
-    h.calls.length = 0;
-    expect((await postAction(POST1, "submit")).status).toBe(200);
-    const made = h.calls.find((c) => c.table === "approvals" && c.op === "insert")!;
-    expect((made.payload as { meta: { postId: string } }).meta.postId).toBe(POST1);
+  it("an approval is trusted for a post only when its metadata names that post (the database writes it at submit time)", async () => {
+    h.tables.content_items = [contentRow({ id: POST1, status: "approved", approval_id: APPROVAL_ID })];
+    h.tables.approvals = [{ id: APPROVAL_ID, org_id: ORG, title: "x", type: "Content", generated_by: "content", status: "approved", preview: "x", meta: { kind: "content_draft", postId: POST1 }, created_at: stamp }];
+    expect((await getSocialPosts())[0].status).toBe("approved");
   });
 });

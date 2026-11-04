@@ -115,7 +115,7 @@ export async function getApprovals(): Promise<Approval[]> { await tick(); return
 export async function getAuditLog(): Promise<AuditEntry[]> { return (await readStore()).audit; }
 export type DecisionResult =
   | { ok: true; approval: Approval }
-  | { ok: false; reason: "not_found" | "not_pending" | "prohibited_claims"; detail?: string[] };
+  | { ok: false; reason: "not_found" | "not_pending" | "prohibited_claims" | "not_editable"; detail?: string[] };
 
 /** Records a human decision. Only pending approvals can be decided, and failed attempts write no audit entry.
  *  Approving never executes, sends or publishes anything: status simply becomes "approved". */

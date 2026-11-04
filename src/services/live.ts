@@ -6,6 +6,7 @@ import { AuthError, ConflictError } from "@/lib/auth/access";
 import { getAuthUser } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { findProhibitedClaims } from "@/lib/content-agent/claims";
+import { MAX_PREVIEW_LENGTH } from "@/lib/content-agent/render";
 import { renderPostForApproval, toView } from "@/lib/social/posts";
 import type { CustomerInput, OrderInput, ProductInput, RetailerInput } from "@/lib/validate";
 import type { Activity, AgentKey, Approval, ApprovalStatus, AuditEntry, Customer, Deal, Order, OrderStatus, PipelineStage, Product, Retailer, Task } from "@/types";
@@ -113,17 +114,19 @@ export async function liveApprovals(): Promise<Approval[]> {
 
 export type LiveDecision =
   | { ok: true; approval: Approval }
-  | { ok: false; reason: "not_found" | "not_pending" | "prohibited_claims"; detail?: string[] };
+  | { ok: false; reason: "not_found" | "not_pending" | "prohibited_claims" | "not_editable"; detail?: string[] };
 
-/** The database function does the permission check, the state check and the audit row in one step, and records the
- *  real signed-in user as the actor. The claim guard still runs here before an approval. */
+/** The database function does the permission check, the state check, the claim check and the audit row in one step, records the
+ *  real signed-in user as the actor, and moves a linked post to approved/rejected in the same transaction. The claim check below
+ *  is only an early answer with details; the database repeats it and cannot be bypassed. It passes NO approved claims, exactly
+ *  like the database: a list stored in the approval's metadata is written by users and is not trusted. */
 export async function liveDecideApproval(id: string, action: "approve" | "reject" | "edit", note?: string, edits?: { title?: string; preview?: string }): Promise<LiveDecision> {
   const { supabase, orgId } = await ctx();
   if (action === "approve") {
-    const { data } = await supabase.from("approvals").select("preview, meta").eq("org_id", orgId).eq("id", id).maybeSingle();
-    const row = data as { preview: string; meta: { kind?: string; allowedClaims?: string[] } | null } | null;
-    if (row?.meta?.kind === "content_draft") {
-      const violations = findProhibitedClaims(row.preview, row.meta.allowedClaims ?? []);
+    const { data } = await supabase.from("approvals").select("title, preview, meta, type, generated_by").eq("org_id", orgId).eq("id", id).maybeSingle();
+    const row = data as { title: string; preview: string; type: string; generated_by: string; meta: { kind?: string } | null } | null;
+    if (row && (row.meta?.kind === "content_draft" || row.generated_by === "content" || row.type === "Content")) {
+      const violations = findProhibitedClaims(`${row.title}\n${row.preview}`, []);
       if (violations.length) return { ok: false, reason: "prohibited_claims", detail: violations.map((v) => `${v.label}: "${v.match}"`) };
     }
   }
@@ -131,19 +134,17 @@ export async function liveDecideApproval(id: string, action: "approve" | "reject
   if (error) {
     if (/not found/i.test(error.message)) return { ok: false, reason: "not_found" };
     if (/already decided/i.test(error.message)) return { ok: false, reason: "not_pending" };
+    if (/cannot be edited/i.test(error.message)) return { ok: false, reason: "not_editable" };
+    if (/prohibited claims/i.test(error.message)) return { ok: false, reason: "prohibited_claims", detail: claimDetail(error.message) };
     fail(error);
   }
   const approval = toApproval(data as ApprovalRow);
-  if (action !== "edit") await syncContentStatus(supabase, orgId, id, action === "approve" ? "approved" : "rejected");
   await liveLog({ agent: approval.generatedBy, action: `${action === "approve" ? "Approved" : action === "reject" ? "Rejected" : "Edited"}: ${approval.title}` });
   return { ok: true, approval };
 }
 
-/** Keeps content_items.status in step with the decision on its approval. Best effort: the post's shown status follows the
- *  approval itself, so a failure here cannot make the calendar wrong. */
-async function syncContentStatus(supabase: Awaited<ReturnType<typeof ctx>>["supabase"], orgId: string, approvalId: string, status: "approved" | "rejected") {
-  try { await supabase.from("content_items").update({ status }).eq("org_id", orgId).eq("approval_id", approvalId); } catch { /* see above */ }
-}
+/** The database reports claim violations as `prohibited claims: label: "text" | label: "text"`. */
+const claimDetail = (message: string) => message.replace(/^.*?prohibited claims:\s*/i, "").split(" | ").filter(Boolean);
 
 export async function liveAudit(): Promise<AuditEntry[]> {
   const { supabase, orgId } = await ctx();
@@ -376,12 +377,22 @@ export type LivePostResult =
   | { ok: true; post: SocialPostView }
   | { ok: false; reason: "not_found" | "invalid_state" | "prohibited_claims"; error: string; detail?: string[] };
 
-/** Only drafts and rejected posts can be edited. Editing makes it a fresh draft with no approval attached. */
+/** Only drafts and rejected posts can be edited. Editing makes it a fresh draft with no approval attached: a rejected post is first
+ *  reopened through reopen_content() (the database does not let a user change the status or the link directly), then its wording is
+ *  updated. The database also refuses to change the wording of a post that is pending, approved or published. */
 export async function liveUpdateSocialPost(id: string, input: SocialPostInput): Promise<LivePostResult> {
   const { supabase, orgId, row, view } = await loadPost(id);
   if (!row || !view) return { ok: false, reason: "not_found", error: "Post not found." };
   if (view.status !== "draft" && view.status !== "rejected") return { ok: false, reason: "invalid_state", error: "Only drafts and rejected posts can be edited." };
-  const change = { ...contentColumns(input), status: "draft", approval_id: null, ...(input.scheduledFor ? { scheduled_for: input.scheduledFor } : {}) };
+  if (row.status !== "draft") {
+    const reopened = await supabase.rpc("reopen_content", { p_post: id });
+    if (reopened.error) {
+      if (/not found/i.test(reopened.error.message)) return { ok: false, reason: "not_found", error: "Post not found." };
+      if (/waiting for a decision/i.test(reopened.error.message)) return { ok: false, reason: "invalid_state", error: "Only drafts and rejected posts can be edited." };
+      fail(reopened.error);
+    }
+  }
+  const change = { ...contentColumns(input), ...(input.scheduledFor ? { scheduled_for: input.scheduledFor } : {}) };
   const { data, error } = await supabase.from("content_items").update(change).eq("org_id", orgId).eq("id", id).select(CONTENT_COLS);
   if (error) fail(error);
   const saved = ((data ?? []) as ContentRow[])[0];
@@ -389,50 +400,36 @@ export async function liveUpdateSocialPost(id: string, input: SocialPostInput): 
   return { ok: true, post: viewFor(saved, new Map()) };
 }
 
-/** Claims the draft first (so a double click cannot queue it twice), then queues a pending approval and links it.
- *  The claim guard runs before anything is written. Nothing is published. */
+/** One database call (submit_content) does everything together: it re-checks the role and that the post is a draft with a caption,
+ *  builds the approval text and metadata itself, applies the claim rules, creates the approval, links it, and records the activity.
+ *  If any part fails nothing is kept, so there is no half-submitted post and no orphan approval. The claim check here only gives
+ *  an early answer with details; the database repeats it. Nothing is published. */
 export async function liveSubmitSocialPost(id: string): Promise<LivePostResult> {
   const { supabase, orgId, row, view } = await loadPost(id);
   if (!row || !view) return { ok: false, reason: "not_found", error: "Post not found." };
   if (view.status !== "draft") return { ok: false, reason: "invalid_state", error: "Only drafts can be submitted for approval." };
   if (!view.caption.trim()) return { ok: false, reason: "invalid_state", error: "Add a caption before submitting." };
   const preview = renderPostForApproval(view);
-  const violations = findProhibitedClaims(preview, []);
+  if (preview.length > MAX_PREVIEW_LENGTH) return { ok: false, reason: "invalid_state", error: `This post is too long to send for approval (limit ${MAX_PREVIEW_LENGTH} characters). Shorten the caption, hashtags or brief.` };
+  const violations = findProhibitedClaims(`${view.title}\n${view.topic}\n${preview}`, []); // the title and topic are scanned too, like the database does
   if (violations.length) {
     return { ok: false, reason: "prohibited_claims", error: "The post contains wording that needs client-approved claims.", detail: violations.map((v) => `${v.label}: "${v.match}"`) };
   }
-  const claim = await supabase.from("content_items").update({ status: "pending_approval" }).eq("org_id", orgId).eq("id", id).eq("status", "draft").select("id");
-  if (claim.error) fail(claim.error);
-  if (!((claim.data ?? []) as unknown[]).length) return { ok: false, reason: "invalid_state", error: "Only drafts can be submitted for approval." };
-  const made = await supabase.from("approvals").insert({
-    org_id: orgId, title: `${view.title} · ${view.platform} post`, type: "Content", generated_by: "content", status: "pending", preview,
-    meta: { kind: "content_draft", subject: view.title, isSample: false, allowedClaims: [], postId: id },
-  }).select("id").single();
-  if (made.error || !made.data) {
-    await supabase.from("content_items").update({ status: "draft" }).eq("org_id", orgId).eq("id", id); // put it back so it can be retried
-    fail(made.error ?? { message: "Database request failed" });
+  const made = await supabase.rpc("submit_content", { p_post: id });
+  if (made.error) {
+    const m = made.error.message;
+    if (/not found/i.test(m)) return { ok: false, reason: "not_found", error: "Post not found." };
+    if (/too long to send/i.test(m)) return { ok: false, reason: "invalid_state", error: `This post is too long to send for approval (limit ${MAX_PREVIEW_LENGTH} characters). Shorten the caption, hashtags or brief.` };
+    if (/only drafts|caption is required/i.test(m)) return { ok: false, reason: "invalid_state", error: /caption/i.test(m) ? "Add a caption before submitting." : "Only drafts can be submitted for approval." };
+    if (/prohibited claims/i.test(m)) return { ok: false, reason: "prohibited_claims", error: "The post contains wording that needs client-approved claims.", detail: claimDetail(m) };
+    fail(made.error);
   }
-  const approvalId = (made.data as { id: string }).id;
-  const link = await supabase.from("content_items").update({ approval_id: approvalId }).eq("org_id", orgId).eq("id", id).select(CONTENT_COLS);
-  const saved = ((link.data ?? []) as ContentRow[])[0];
-  if (link.error || !saved) {
-    await undoSubmit(supabase, orgId, id, approvalId);
-    if (link.error) fail(link.error);
-    return { ok: false, reason: "not_found", error: "Post not found." };
-  }
-  await liveLog({ agent: "content", action: `Sent "${view.title}" (${view.platform}) for approval` });
+  const approvalId = String(made.data);
+  const { data, error } = await supabase.from("content_items").select(CONTENT_COLS).eq("org_id", orgId).eq("id", id).maybeSingle();
+  if (error) fail(error);
+  const saved = data as ContentRow | null;
+  if (!saved) return { ok: false, reason: "not_found", error: "Post not found." };
   return { ok: true, post: viewFor(saved, new Map<string, ApprovalLink>([[approvalId, { status: "pending", postId: id }]])) };
-}
-
-/** The approval was created but could not be linked to its post. The database allows no delete or update of approvals, so
- *  this uses only what is already permitted: put the post back to a draft (it can be resubmitted), and, if the caller may
- *  decide approvals, reject the unlinked approval through decide_approval() so it does not sit in the queue. Anyone else
- *  (staff) leaves a pending approval that no post points to; approving it does nothing. Best effort. */
-async function undoSubmit(supabase: Awaited<ReturnType<typeof ctx>>["supabase"], orgId: string, postId: string, approvalId: string) {
-  try { await supabase.from("content_items").update({ status: "draft" }).eq("org_id", orgId).eq("id", postId); } catch { /* see above */ }
-  try {
-    await supabase.rpc("decide_approval", { p_id: approvalId, p_action: "reject", p_note: "Not linked to a post: the submission failed. Please resubmit.", p_title: null, p_preview: null });
-  } catch { /* the caller may not be allowed to decide */ }
 }
 
 /* ---------- Orders ---------- */

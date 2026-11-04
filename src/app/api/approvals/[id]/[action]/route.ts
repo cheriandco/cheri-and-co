@@ -22,5 +22,6 @@ export async function POST(req: Request, ctx: Ctx) {
   if (res.ok) return NextResponse.json(res.approval);
   if (res.reason === "not_found") return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (res.reason === "not_pending") return NextResponse.json({ error: "This item has already been decided." }, { status: 409 });
+  if (res.reason === "not_editable") return NextResponse.json({ error: "A post's approval cannot be edited. Reject it, then change the post and send it again." }, { status: 409 });
   return NextResponse.json({ error: "The draft contains wording that is not allowed. Edit it before approving.", issues: res.detail }, { status: 422 });
 }

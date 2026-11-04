@@ -1,6 +1,6 @@
 # Supabase foundation: setup and security
 
-Status: **built and tested locally. The foundation migration was applied to project `ciodkacwdbktuimriuss` by the project owner and
+Status: **built and tested locally. A second migration, `supabase/migrations/20261104000000_security_hardening.sql` (database claims guard and locked content; `docs/SECURITY_HARDENING_REPORT.md`), is prepared but NOT applied to any project and tested only in-process; staging steps are in `docs/STAGING_SETUP_AND_VERIFICATION.md`.** Original foundation status: ** The foundation migration was applied to project `ciodkacwdbktuimriuss` by the project owner and
 `docs/rls_live_check.sql` passed 95/95 there (reported by the owner; it predates Slices 2 to 4, which changed no schema).** Everything else here
 (real sign-in, the Slice 1 to 4 queries as PostgREST runs them, the approval round trip) has **not** been run against the hosted service. The SQL was
 executed and tested in an in-process Postgres (`tests/rls.test.ts`); the sign-in and data code were tested with a fake client.
@@ -65,7 +65,7 @@ Optionally add a second organisation `('Cheri & Co. (sample demo)', true)` and a
   recommendations and discovery candidates are sample-only and hidden for live orgs.
 - Slice 3: Products (list, detail, create, edit; `products:write` = owner/admin/approver/staff) and Content (`content_items`: social
   posts on Instagram, Facebook and LinkedIn; create, edit a draft or rejected post, submit for approval). A post's status follows its
-  approval (queued as a pending `approvals` row, decided through `decide_approval()`); `content_items.status` is mirrored after a decision.
+  approval. With the hardening migration applied: `submit_content()` creates the pending approval and links it atomically, `decide_approval()` applies the claim rules and moves the post in the same transaction, and `reopen_content()` is the only way back to a draft; pending, approved and published wording cannot be edited directly. Without it (foundation only) the app queued the approval itself and mirrored the status after a decision.
   A post is shown as approved or rejected only when an approval whose `meta.postId` names that post says so; a status or `approval_id` written straight to
   the table (writers are allowed to update `content_items`) is not believed and shows as a draft. Edits made straight to an already approved post's caption are not detected (no schema change was made to block them).
   Gaps: no engagement/metrics columns (Performance is "not available"); no asset storage; no brand-rule table; "Simulate publish" is
@@ -84,7 +84,7 @@ Optionally add a second organisation `('Cheri & Co. (sample demo)', true)` and a
 ## Known limitations
 - Sample data lives in server memory and is shown only to demo organisations and the public demo. B2C Sales and Amazon Intelligence have no stored data yet.
 - Lists are read in pages of 1000 rows; a single list of more than 10,000 records is refused with an error rather than shown incomplete. Tasks cannot be assigned to a person yet (the assignee is not stored).
-- The prohibited-claims guard for content runs in the application, not inside `decide_approval()`.
+- The prohibited-claims guard and the content lock exist in the hardening migration but only once it is applied; on the existing project (foundation only) the guard runs in the application, not inside `decide_approval()`, and a writer can still edit an approved post directly. The hardened app code needs the migration: apply both together (`docs/SECURITY_HARDENING_REPORT.md`).
 - A post counts as approved only if its approval's `meta.postId` equals the post's id. Approvals created before that field existed (legacy approvals without `meta.postId`) do not approve anything: their post shows as a draft, even if the approval itself was approved. A post stuck at pending approval can be edited back to a draft and submitted again. No such data is known to exist on the hosted project (unverified).
 - Postponing a task adds one day to its current due date. An overdue task therefore stays overdue (10 days overdue becomes 9); a task with no due date gets one day from now.
 - One organisation per user is read (the oldest membership). Multi-organisation switching is not built.
