@@ -69,6 +69,31 @@ export function followUpEmail(r: Retailer): string {
   ].join("\n");
 }
 
+/** The plain template follow-up for a real retailer. Unlike the sample email it has no SAMPLE wording and states no prices,
+ *  terms or product claims: the team adds those before anything is sent. It is a template, not AI-written text. */
+export function liveFollowUpDraft(r: Pick<Retailer, "stage" | "business" | "temperature" | "contact" | "email">): { title: string; preview: string } {
+  const f = followUpFor(r);
+  const known = r.contact.trim() && !/to be confirmed|not recorded/i.test(r.contact);
+  const name = known ? r.contact.trim().split(/\s+/)[0] : "there";
+  return {
+    title: `Follow-up email — ${r.business}`,
+    preview: [
+      `To: ${known ? r.contact.trim() : "the owner"} (${r.business})${r.email.trim() && !/not recorded/i.test(r.email) ? ` <${r.email.trim()}>` : ""}`,
+      `Subject: ${f.title.replace(/ to .*/, "")} — Cheri & Co.`,
+      "",
+      `Hi ${name},`,
+      "",
+      "We are Cheri & Co. We would love to share how our jewellery could work for " + r.business + ".",
+      f.reason,
+      "",
+      "[Add the products, prices and terms here before sending. Nothing has been sent.]",
+      "",
+      "Warm regards,",
+      "Cheri & Co. sales team",
+    ].join("\n"),
+  };
+}
+
 /* ---------- B2C ---------- */
 
 export function suggestedReplyFor(c: Conversation): string {

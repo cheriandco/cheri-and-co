@@ -24,6 +24,7 @@ export default async function RetailerPage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const live = await isLiveOrg();
   const canEdit = live && can((await getAuthUser())?.role, "pipeline:write");
+  const canQueue = live && can((await getAuthUser())?.role, "agents:run");
   const r = await getRetailer(id);
   if (!r) notFound();
   const [tasks, activities, links] = await Promise.all([getTasks(), getActivities(), getActionLinks()]);
@@ -66,18 +67,18 @@ export default async function RetailerPage({ params }: { params: Promise<{ id: s
             </dl>
           </DashboardCard>
           {!live && (
-            <>
           <DashboardCard>
             <SectionHeader title="Qualification factors" extra={<SimBadge>SAMPLE · rule-based</SimBadge>} />
             <FactorList factors={qualificationFactors(r)} />
           </DashboardCard>
+          )}
+          {(!live || canQueue) && (
           <DashboardCard tint>
-            <SectionHeader title="Recommended follow-up" extra={<SimBadge />} />
+            <SectionHeader title="Recommended follow-up" extra={live ? undefined : <SimBadge />} />
             <p style={{ margin: "0 0 4px", fontWeight: 500 }}>{follow.title}</p>
-            <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>{follow.reason} Drafting sends nothing: the email waits in Approvals.</p>
-            <QueueButton agent="b2b" refId={r.id} label="Draft follow-up email (demo)" link={links[`b2b:${r.id}`]} />
+            <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>{follow.reason} Drafting sends nothing: a plain template email waits in Approvals for a person to review{live ? " and edit" : ""}.</p>
+            <QueueButton agent="b2b" refId={r.id} label={live ? "Draft follow-up email" : "Draft follow-up email (demo)"} link={links[`b2b:${r.id}`]} live={live} />
           </DashboardCard>
-            </>
           )}
         </div>
         <div className="stack">

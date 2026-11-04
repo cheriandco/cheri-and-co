@@ -34,14 +34,14 @@ const Problem = ({ state }: { state: unknown }) => (typeof state === "object" &&
   ? <span role="alert" style={{ color: "var(--danger)", fontSize: 12 }}>{(state as { error: string }).error}</span> : null);
 
 /** "Send to approval (demo)": queues an agent suggestion in Approvals. Shows the decision once it has one. */
-export function QueueButton({ agent, refId, label = "Send to approval (demo)", link }: {
-  agent: "b2c" | "b2b" | "amazon"; refId: string; label?: string; link?: { approvalId: string; status: Approval["status"] };
+export function QueueButton({ agent, refId, label = "Send to approval (demo)", link, live = false }: {
+  agent: "b2c" | "b2b" | "amazon"; refId: string; label?: string; link?: { approvalId: string; status: Approval["status"] }; live?: boolean;
 }) {
   const { state, go } = useAction(() => postJson("/api/agent-actions", { agent, ref: refId }));
   if (link?.status === "pending") return <span className="row" style={{ gap: 8 }}><span className="badge champagne">Pending approval</span><Link className="link" href="/approvals">Open</Link></span>;
   return (
     <span className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-      {link && <span className={`badge ${link.status === "rejected" ? "danger" : "sage"}`}>{link.status === "rejected" ? "Rejected (demo)" : "Approved (demo)"}</span>}
+      {link && <span className={`badge ${link.status === "rejected" ? "danger" : "sage"}`}>{link.status === "rejected" ? (live ? "Rejected" : "Rejected (demo)") : (live ? "Approved" : "Approved (demo)")}</span>}
       <button type="button" className="btn sm" disabled={state === "busy"} onClick={() => void go()}>
         {state === "busy" ? "Working…" : link ? "Queue again" : label}
       </button>

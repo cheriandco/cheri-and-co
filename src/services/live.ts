@@ -7,6 +7,7 @@ import { getAuthUser } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { findProhibitedClaims } from "@/lib/content-agent/claims";
 import { renderPostForApproval, toView } from "@/lib/social/posts";
+import { liveFollowUpDraft } from "@/lib/agent-logic";
 import type { CustomerInput, OrderInput, ProductInput, RetailerInput } from "@/lib/validate";
 import type { Activity, AgentKey, Approval, ApprovalStatus, AuditEntry, Customer, Deal, Order, OrderStatus, PipelineStage, Product, Retailer, Task } from "@/types";
 import type { ReportSection } from "@/types";
@@ -130,7 +131,7 @@ export async function liveDecideApproval(id: string, action: "approve" | "reject
   if (action === "approve") {
     const { data } = await supabase.from("approvals").select("preview, meta").eq("org_id", orgId).eq("id", id).maybeSingle();
     const row = data as { preview: string; meta: { kind?: string; allowedClaims?: string[] } | null } | null;
-    if (row?.meta?.kind === "content_draft") {
+    if (row?.meta?.kind === "content_draft" || row?.meta?.kind === "b2b_followup") {
       const violations = findProhibitedClaims(row.preview, row.meta.allowedClaims ?? []);
       if (violations.length) return { ok: false, reason: "prohibited_claims", detail: violations.map((v) => `${v.label}: "${v.match}"`) };
     }
@@ -467,6 +468,70 @@ async function undoSubmit(supabase: Awaited<ReturnType<typeof ctx>>["supabase"],
   try {
     await supabase.rpc("decide_approval", { p_id: approvalId, p_action: "reject", p_note: "Not linked to a post: the submission failed. Please resubmit.", p_title: null, p_preview: null });
   } catch { /* the caller may not be allowed to decide */ }
+}
+
+/* ---------- Agent suggestions (B2B follow-up) -> Approvals ---------- */
+
+export type LiveQueueResult =
+  | { ok: true; approval: Approval }
+  | { ok: false; reason: "not_found" | "already_queued" | "prohibited_claims"; error: string; detail?: string[] };
+
+/** Queues a plain template follow-up email for one of this organisation's retailers as a pending approval.
+ *  Nothing is sent. The text is built here from the saved record (the browser only names the retailer), the claim guard runs
+ *  before anything is written, and a retailer that already has a pending follow-up is refused. The signed-in user is recorded
+ *  in the activity history (approvals have no created_by column). Two simultaneous requests could both pass the duplicate
+ *  check (no unique constraint without a migration); the second is then a visible duplicate that a person rejects. */
+export async function liveQueueB2bFollowUp(ref: string): Promise<LiveQueueResult> {
+  if (!UUID.test(ref)) return { ok: false, reason: "not_found", error: "Retailer not found." };
+  const { supabase, orgId } = await ctx();
+  const found = await supabase.from("retailers").select(RETAILER_COLS).eq("org_id", orgId).eq("id", ref).maybeSingle();
+  if (found.error) fail(found.error);
+  if (!found.data) return { ok: false, reason: "not_found", error: "Retailer not found." };
+  const row = found.data as RetailerRow;
+  const lead = await supabase.from("leads").select(LEAD_COLS).eq("org_id", orgId).eq("retailer_id", ref).order("last_activity_at", { ascending: false }).limit(1);
+  if (lead.error) fail(lead.error);
+  const retailer = toRetailer(row, ((lead.data ?? []) as LeadRow[])[0]);
+
+  const draft = liveFollowUpDraft(retailer);
+  const violations = findProhibitedClaims(draft.preview, []);
+  if (violations.length) {
+    return { ok: false, reason: "prohibited_claims", error: "The draft contains wording that needs client-approved claims.", detail: violations.map((v) => `${v.label}: "${v.match}"`) };
+  }
+  if ((await pendingAgentActions(supabase, orgId)).has(`b2b:${ref}`)) return { ok: false, reason: "already_queued", error: "This is already waiting in Approvals." };
+
+  const made = await supabase.from("approvals").insert({
+    org_id: orgId, title: draft.title, type: "B2B outreach", generated_by: "b2b", status: "pending", preview: draft.preview,
+    meta: { kind: "b2b_followup", subject: retailer.business, isSample: false, allowedClaims: [], agent: "b2b", ref },
+  }).select("id, title, type, generated_by, status, preview, meta, created_at").single();
+  if (made.error || !made.data) fail(made.error ?? { message: "Database request failed" });
+  await liveLog({ agent: "b2b", action: `Drafted a follow-up email for ${retailer.business} and sent it for approval (not sent to the retailer)` });
+  return { ok: true, approval: toApproval(made.data as ApprovalRow) };
+}
+
+/** "agent:ref" keys that already have a pending approval. */
+async function pendingAgentActions(supabase: Awaited<ReturnType<typeof ctx>>["supabase"], orgId: string): Promise<Map<string, string>> {
+  const rows = await allRows<ApprovalRow>((from, to) => supabase.from("approvals").select("id, title, type, generated_by, status, preview, meta, created_at")
+    .eq("org_id", orgId).eq("status", "pending").order("created_at", { ascending: false }).order("id").range(from, to));
+  const out = new Map<string, string>();
+  for (const r of rows) {
+    const m = r.meta as { kind?: string; agent?: string; ref?: string } | null;
+    if (m?.kind === "b2b_followup" && m.agent && m.ref) out.set(`${m.agent}:${m.ref}`, r.id);
+  }
+  return out;
+}
+
+/** For each "agent:ref" with an agent suggestion: the latest approval and its decision (newest approval wins). */
+export async function liveActionLinks(): Promise<Record<string, { approvalId: string; status: Approval["status"] }>> {
+  const approvals = await liveApprovals(); // newest first
+  const out: Record<string, { approvalId: string; status: Approval["status"] }> = {};
+  for (const a of approvals) {
+    const m = a.meta;
+    if (m?.kind === "b2b_followup" && m.agent && m.ref) {
+      const key = `${m.agent}:${m.ref}`;
+      if (!out[key]) out[key] = { approvalId: a.id, status: a.status };
+    }
+  }
+  return out;
 }
 
 /* ---------- Orders ---------- */

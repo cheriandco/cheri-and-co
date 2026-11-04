@@ -14,7 +14,7 @@ import { AGENT_NAMES, STAGE_LABELS } from "@/lib/agents";
 import { renderDraft } from "@/lib/content-agent/render";
 import type { CustomerInput, OrderInput, ProductInput, RetailerInput } from "@/lib/validate";
 import {
-  liveCreateCustomer, liveCreateProduct, liveCreateRetailer, liveImportLog, liveUpdateCustomer, liveUpdateRetailer, liveCreateSocialPost, liveCreateTask, liveCustomer, liveCustomers, liveDecideApproval,
+  liveCreateCustomer, liveCreateProduct, liveCreateRetailer, liveImportLog, liveQueueB2bFollowUp, liveActionLinks, liveUpdateCustomer, liveUpdateRetailer, liveCreateSocialPost, liveCreateTask, liveCustomer, liveCustomers, liveDecideApproval,
   liveCreateOrder, liveMoveDeal, liveSalesReport, liveOrder, liveOrders, liveProduct, liveProducts, liveSocialPosts, liveSubmitSocialPost, liveUpdateOrderStatus, liveUpdateProduct, liveUpdateSocialPost, liveUpdateTask,
 } from "./live";
 import type { WriteOptions } from "./live";
@@ -132,7 +132,7 @@ export async function decideApproval(
   const a = store.approvals.find((x) => x.id === id);
   if (!a) return { ok: false, reason: "not_found" };
   if (a.status !== "pending") return { ok: false, reason: "not_pending" };
-  if (action === "approve" && a.meta?.kind === "content_draft") {
+  if (action === "approve" && (a.meta?.kind === "content_draft" || a.meta?.kind === "b2b_followup")) {
     const violations = findProhibitedClaims(a.preview, a.meta.allowedClaims);
     if (violations.length) return { ok: false, reason: "prohibited_claims", detail: violations.map((v) => `${v.label}: "${v.match}"`) };
   }
@@ -316,11 +316,17 @@ export async function getSearchIndex() {
 export type QueueAgent = "b2c" | "b2b" | "amazon";
 export type QueueResult =
   | { ok: true; approval: Approval }
-  | { ok: false; reason: "not_found" | "already_queued"; error: string };
+  | { ok: false; reason: "not_found" | "already_queued" | "prohibited_claims"; error: string };
 
 /** The text is always rebuilt on the server from the sample records; the browser only names the record. */
 export async function queueAgentAction(agent: QueueAgent, ref: string): Promise<QueueResult> {
-  if (await isLiveOrg()) return { ok: false, reason: "not_found", error: "This agent action is not connected to the database yet." };
+  if (await isLiveOrg()) {
+    // Only B2B has real records behind it. B2C conversations and Amazon rows have no live source yet, so they stay refused (never invented).
+    if (agent !== "b2b") return { ok: false, reason: "not_found", error: `${agent === "b2c" ? "Instagram replies" : "Amazon suggestions"} are not connected to a data source yet, so nothing can be queued.` };
+    const r = await liveQueueB2bFollowUp(ref);
+    if (r.ok) return r;
+    return { ok: false, reason: r.reason, error: r.detail?.length ? `${r.error} ${r.detail.join("; ")}` : r.error };
+  }
   const s = await writableStore();
   const key = `${agent}:${ref}`;
   const prior = s.links[key] ? s.approvals.find((a) => a.id === s.links[key]) : undefined;
@@ -349,6 +355,7 @@ export async function queueAgentAction(agent: QueueAgent, ref: string): Promise<
 
 /** For each "agent:ref" this visitor has queued: the approval and its current decision. */
 export async function getActionLinks(): Promise<Record<string, { approvalId: string; status: Approval["status"] }>> {
+  if (await isLiveOrg()) return liveActionLinks();
   const s = await readStore();
   const out: Record<string, { approvalId: string; status: Approval["status"] }> = {};
   for (const [key, id] of Object.entries(s.links)) {

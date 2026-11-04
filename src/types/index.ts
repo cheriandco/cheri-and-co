@@ -158,10 +158,13 @@ export type ApprovalStatus = "pending" | "approved" | "rejected" | "executed";
 
 /** Set on approvals created by the Content & Marketing Agent so the claim guard can re-check them on approval. */
 export interface ContentApprovalMeta {
-  kind: "content_draft";
+  kind: "content_draft" | "b2b_followup";
   subject: string;
   isSample: boolean;
   allowedClaims: string[];
+  /** Set on agent suggestions (kind "b2b_followup"): which agent drafted it and the record it is about. */
+  agent?: string;
+  ref?: string;
 }
 
 export interface Approval {
