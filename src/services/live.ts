@@ -125,7 +125,7 @@ export async function liveDecideApproval(id: string, action: "approve" | "reject
   if (action === "approve") {
     const { data } = await supabase.from("approvals").select("title, preview, meta, type, generated_by").eq("org_id", orgId).eq("id", id).maybeSingle();
     const row = data as { title: string; preview: string; type: string; generated_by: string; meta: { kind?: string } | null } | null;
-    if (row && (row.meta?.kind === "content_draft" || row.generated_by === "content" || row.type === "Content")) {
+    if (row) { // every approval is scanned, like the database does: the type is chosen by whoever created the approval
       const violations = findProhibitedClaims(`${row.title}\n${row.preview}`, []);
       if (violations.length) return { ok: false, reason: "prohibited_claims", detail: violations.map((v) => `${v.label}: "${v.match}"`) };
     }

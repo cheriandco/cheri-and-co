@@ -151,8 +151,8 @@ select pg_temp.chk('1 Claims', 'staff cannot plant allowedClaims / postId / kind
   $q$with x as (insert into public.approvals (org_id, title, type, generated_by, preview, meta) values ('{orgA}', 'SECTEST forge', 'Content', 'content', 'p', '{"allowedClaims":["waterproof"]}') returning 1) select count(*)::text from x$q$, null, 'set only by the approval workflow');
 select pg_temp.chk('1 Claims', 'a refused approval stays pending (nothing changed)', null, null, $q$select status from public.approvals where id = '{apBad}'$q$, 'pending');
 select pg_temp.chk('1 Claims', 'a refused decision wrote no audit row', null, null, $q$select count(*)::text from public.audit_log where approval_id in ('{apBad}','{apCase}','{apForged}')$q$, '0');
-select pg_temp.chk('1 Claims', 'non-content approvals are not blocked by the claim rules', 'authenticated', 'approverA',
-  $q$select status from public.decide_approval('{apB2c}', 'approve')$q$, 'approved');
+select pg_temp.chk('1 Claims', 'a non-content approval with a price is refused too (F2)', 'authenticated', 'approverA',
+  $q$select status from public.decide_approval('{apB2c}', 'approve')$q$, null, 'prohibited claims');
 select pg_temp.chk('1 Claims', 'a clean content approval is approved and its post follows in the same step', 'authenticated', 'approverA',
   $q$select status from public.decide_approval((select approval_id from public.content_items where id = '{pClean}'), 'approve', 'ok')$q$, 'approved');
 select pg_temp.chk('1 Claims', '...the post is now approved', null, null, $q$select status from public.content_items where id = '{pClean}'$q$, 'approved');
@@ -270,6 +270,24 @@ select pg_temp.chk('5 Length', 'a post too long for the approval queue gets a pl
   $q$select public.submit_content('{pLong}')::text$q$, null, 'too long to send for approval');
 select pg_temp.chk('5 Length', '...and stays an untouched draft', null, null,
   $q$select (status = 'draft' and approval_id is null)::text from public.content_items where id = '{pLong}'$q$, 'true');
+
+-- 6. Remaining review items (F9, F10, F11, F15)
+select pg_temp.chk('6 Locks', 'a pending post still cannot have its wording changed', 'authenticated', 'staffA',
+  $q$with x as (update public.content_items set title = 'changed' where id = '{pLock}' returning 1) select count(*)::text from x$q$, null, 'locked while it is pending approval');
+select pg_temp.chk('6 Locks', '...but the planned date can still be moved', 'authenticated', 'staffA',
+  $q$with x as (update public.content_items set scheduled_for = '2027-01-05' where id = '{pLock}' returning 1) select count(*)::text from x$q$, '1');
+select pg_temp.chk('6 Link', 'one approval cannot be linked to two posts', null, null,
+  $q$with x as (update public.content_items set approval_id = (select approval_id from public.content_items where approval_id is not null and id <> '{pBad}' limit 1) where id = '{pBad}' returning 1) select count(*)::text from x$q$, null, 'duplicate key|content_items_approval_id_key');
+select pg_temp.chk('6 Creator', 'a new post records the real caller as creator, not the value sent', 'authenticated', 'staffA',
+  $q$with x as (insert into public.content_items (org_id, platform, title, created_by) values ('{orgA}', 'Instagram', 'SECTEST creator', '{ownerA}') returning created_by) select (created_by = '{staffA}')::text from x$q$, 'true');
+select pg_temp.chk('6 Delete', 'staff cannot delete a post', 'authenticated', 'staffA',
+  $q$with x as (delete from public.content_items where id = '{pLong}' returning 1) select count(*)::text from x$q$, '0');
+select pg_temp.chk('6 Delete', 'an admin can delete a post', 'authenticated', 'adminA',
+  $q$with x as (delete from public.content_items where id = '{pLong}' returning 1) select count(*)::text from x$q$, '1');
+select pg_temp.chk('6 Delete', '...and the deletion is recorded under the admin', null, null,
+  $q$select count(*)::text from public.agent_activity where ref_id = '{pLong}' and actor_id = '{adminA}' and action like 'Deleted%'$q$, '1');
+select pg_temp.chk('6 Claims', 'a non-content approval is scanned too (type is chosen by the writer)', 'authenticated', 'approverA',
+  $q$select status from public.decide_approval('{apB2c}', 'approve')$q$, null, 'prohibited claims');
 
 -- ---- report -----------------------------------------------------------------------------------------------------------
 select n, section, test, result, expected, actual from (

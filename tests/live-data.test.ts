@@ -240,9 +240,11 @@ describe("live approval decisions", () => {
       expect(await decideApproval("a9", "approve", "x"), preview).toMatchObject({ ok: false, reason: "prohibited_claims" });
     }
   });
-  it("non-content approvals with a price in them are not blocked by the early check", async () => {
-    h.rpcResult = { data: { id: "a1", title: "Reply", type: "Instagram reply", generated_by: "b2c", status: "approved", preview: "It is ₹499", meta: null, created_at: new Date().toISOString() }, error: null };
+  it("F2: approvals of any type are scanned by the early check; a clean one passes", async () => {
     h.tables.approvals = [{ id: "a1", org_id: ORG, title: "Reply", type: "Instagram reply", generated_by: "b2c", status: "pending", preview: "It is ₹499, 50% off", meta: null, created_at: new Date().toISOString() }];
+    expect(await decideApproval("a1", "approve", "x")).toMatchObject({ ok: false, reason: "prohibited_claims" });
+    h.rpcResult = { data: { id: "a1", title: "Reply", type: "Instagram reply", generated_by: "b2c", status: "approved", preview: "Thanks for your message", meta: null, created_at: new Date().toISOString() }, error: null };
+    h.tables.approvals = [{ id: "a1", org_id: ORG, title: "Reply", type: "Instagram reply", generated_by: "b2c", status: "pending", preview: "Thanks for your message", meta: null, created_at: new Date().toISOString() }];
     expect(await decideApproval("a1", "approve", "x")).toMatchObject({ ok: true });
   });
 });

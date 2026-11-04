@@ -242,7 +242,7 @@ multi-currency, Amazon Global/UAE/UK/US expansion; mobile apps; MFA and password
 
 ## Appendix 3: Slices 1 to 4 review
 
-**What the tests prove.** (Counts below are from before the sprint; the suite now has 382 tests.) `tests/live-data.test.ts` (about 79 test cases, recording fake Supabase client) proves application logic: every query is scoped to the
+**What the tests prove.** (Counts below are from before the sprint; the suite now has 388 tests.) `tests/live-data.test.ts` (about 79 test cases, recording fake Supabase client) proves application logic: every query is scoped to the
 session's organisation, roles are enforced per route (viewer 403), validators reject bad input, mappers fall back safely, demo/live separation, and the
 business rules for purchases and revenue. `tests/rls.test.ts` (about 36 cases) runs the real migration in an in-process Postgres and proves policy behaviour, composite keys,
 append-only audit and `decide_approval()`. `tests/auth.test.ts` (about 23, fake client) proves guards and redirects. Agent tests (B2C, Content, Social, demo isolation) prove

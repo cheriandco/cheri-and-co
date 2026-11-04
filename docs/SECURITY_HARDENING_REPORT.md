@@ -98,14 +98,16 @@ Wrapped in `begin; ... commit;`.
 4. `private.approvals_meta_guard()` + trigger `approvals_meta_guard` (before insert).
 5. `public.submit_content(uuid)`, `public.reopen_content(uuid)`; `create or replace` of `public.decide_approval(...)` (same signature).
 6. Grants: all three public functions revoked from public and anon, granted to authenticated.
+7. Review follow-ups: `private.content_items_set_creator()` + trigger (before insert, F15); unique partial index `content_items_approval_id_key` on `content_items (approval_id)` (F10);
+   `private.content_items_log_delete()` + trigger (after delete, F11); the content guard now locks every column except the planned date (F9); every approval is claim-scanned, not only content ones (F2).
 
-No tables, columns, constraints, indexes, existing policies (other than the two `alter policy` statements) or data are changed. No deletion is introduced. Existing RLS and organisation isolation are unchanged.
+The only schema addition is the one unique index (F10). It fails to apply if two posts already share an approval, which is why `docs/security_hardening_preapply_audit.sql` (query A3) must be run first. No existing policies other than the two `alter policy` statements, and no data, are changed. Nothing is deleted by the migration. Existing RLS and organisation isolation are unchanged.
 
 ## 4. Tests added (all local; none hosted)
 | File | Kind | Count | Covers |
 |---|---|---|---|
-| `tests/security-hardening.test.ts` | in-process Postgres, real migrations | 60 | SQL/JS rule drift; 200+ phrase/case parity; **19 look-alike spellings caught identically by both sides, normaliser parity and no false alarms for Devanagari/Tamil/Japanese/accented copy, drift of the normalisation steps (F1); stranded approvals can be rejected but not approved (F3); an approval of a post cannot be edited and the approved text equals the post (F4); activity that points at a post cannot be forged, real history is written (F5); title/topic/approval-title scanned (F6); the 6000-character boundary and a clear message (F12)**; direct `decide_approval` calls with prohibited wording, case variations, forged allowlist, edited (unlinked) approval text, post fields, reject allowed, non-content approvals not blocked; role matrix (owner, admin, approver, staff, viewer, stranger, visitor, other organisation); locked content for staff and owner in each locked state; status and link writes denied; insert-as-approved denied; submit/reopen/resubmit workflow; forged and mismatched metadata; failed steps leave no change; audit and activity rows; function privileges |
-| `tests/security-hardening-script.test.ts` | in-process Postgres | 1 | `docs/security_hardening_live_check.sql` (the staging script: 73 checks, of which 22 are new for the review fixes) runs end to end and every check passes; leaves no data |
+| `tests/security-hardening.test.ts` | in-process Postgres, real migrations | 66 | SQL/JS rule drift; 200+ phrase/case parity; **19 look-alike spellings caught identically by both sides, normaliser parity and no false alarms for Devanagari/Tamil/Japanese/accented copy, drift of the normalisation steps (F1); stranded approvals can be rejected but not approved (F3); an approval of a post cannot be edited and the approved text equals the post (F4); activity that points at a post cannot be forged, real history is written (F5); title/topic/approval-title scanned (F6); the 6000-character boundary and a clear message (F12)**; direct `decide_approval` calls with prohibited wording, case variations, forged allowlist, edited (unlinked) approval text, post fields, reject allowed, non-content approvals not blocked; role matrix (owner, admin, approver, staff, viewer, stranger, visitor, other organisation); locked content for staff and owner in each locked state; status and link writes denied; insert-as-approved denied; submit/reopen/resubmit workflow; forged and mismatched metadata; failed steps leave no change; audit and activity rows; function privileges |
+| `tests/security-hardening-script.test.ts` | in-process Postgres | 1 | `docs/security_hardening_live_check.sql` (the staging script: 81 checks, of which 30 are new for the review fixes) runs end to end and every check passes; leaves no data |
 | `tests/live-data.test.ts` (updated) | fake client | 9 rewritten, 4 added, then 6 more for the review fixes | the app never writes status or approval links itself; submit is one call; refusals mapped (404, 409, 422 with details, 403); allowlist in metadata ignored; reopen-then-edit; the old multi-step undo tests replaced |
 Mutation check: removing the claim check, the content trigger, the metadata check or the insert rule each makes tests fail. For the review fixes, each of these was undone in turn and the tests failed every time:
 the normaliser (3 tests fail), the reject rule for stranded approvals (3), the edit refusal (2), the narrowed activity policy (2), the title/topic scan at submit (2), the approval-title scan at approval (2), and the length check (3).
@@ -116,9 +118,9 @@ the normaliser (3 tests fail), the reject rule for stranded approvals (3), the e
   calls `submit_content` and `reopen_content`, so **the app and the migration must be deployed together** (live submit and edit of social posts fail against a database without the migration).
 - **Postgres regex dialect** differs from JavaScript in the ways listed in section 1; parity was tested for a broad phrase set, not exhaustively.
 - **No trusted approved-claims source.** Every claim rule applies in full for live content. A real allowed-claims mechanism (client-approved, stored by an administrator) is a later schema decision and is not in the frozen scope.
-- **Owner/admin can still delete a post** (delete policy unchanged, by instruction). Deletion removes content; it does not approve anything.
-- **Approver edits** of an approval that belongs to a post are refused (F4). Edits of approvals that do not belong to a post remain; the claim check runs on the edited text at approval. Nothing is published by the application, so what a person later posts by hand is outside the system.
-- **Rows created before the migration** (a post already set to approved by hand, or approvals without `meta.postId`) are not rewritten. They show as drafts in the app (approval-backed rule) and a staff member needs an approver to reopen an approved one.
+- **Owner/admin can still delete a post** (delete policy unchanged, by instruction). Deletion removes content; it does not approve anything. Since F11 every deletion is recorded in `agent_activity` with the person who did it.
+- **Approver edits** of an approval that belongs to a post are refused (F4). Edits of approvals that do not belong to a post remain; the claim check runs on the edited text at approval, and since F2 it runs for every approval whatever its type. Nothing is published by the application, so what a person later posts by hand is outside the system.
+- **Rows created before the migration** (a post already set to approved by hand, or approvals without `meta.postId`) are not rewritten; run `docs/security_hardening_preapply_audit.sql` first on any database that holds data (F7). They show as drafts in the app (approval-backed rule) and a staff member needs an approver to reopen an approved one.
 - `agent_activity` is the audit trail for submit and reopen; `audit_log` still covers decisions only.
 - Sign-ups on the existing project (last seen ON), and the unverified behind-domain CSRF check, are unchanged and remain the owner's/M7 items.
 - This report and the migration are **not reviewed by the project owner yet**.
@@ -131,6 +133,11 @@ The migration changes no data and no tables, so it can be removed without data l
 begin;
 drop trigger if exists content_items_guard on public.content_items;
 drop trigger if exists approvals_meta_guard on public.approvals;
+drop trigger if exists content_items_set_creator on public.content_items;
+drop trigger if exists content_items_log_delete on public.content_items;
+drop index if exists public.content_items_approval_id_key;
+drop function if exists private.content_items_set_creator();
+drop function if exists private.content_items_log_delete();
 drop function if exists private.content_items_guard();
 drop function if exists private.approvals_meta_guard();
 drop function if exists public.submit_content(uuid);
@@ -148,8 +155,11 @@ commit;
 Recovery after a mid-flight problem: the functions are atomic, so there is no partial state to repair. Posts that were approved under the new workflow stay approved; their approvals remain as history.
 Take a database backup (staging: not needed; production: required) before applying or rolling back. Re-running the migration after a rollback is safe (it uses `create or replace` and recreates the triggers).
 The rollback block above was executed locally exactly as written, followed by the foundation `decide_approval()` block: no hardening object, trigger or changed policy remained, and the migration applied again cleanly afterwards.
-**Known gap (review finding F8, not in the approved fix list):** during a rollback there is a short window in which the old application and the new database (or the reverse) cannot submit or edit posts.
-Do the app rollback and the database rollback back to back, outside working hours, and expect social post submit/edit to fail in between. This does not corrupt data.
+**Ordering and the compatibility window (review finding F8).** The app and the migration depend on each other in both directions, so a rollback has a short window in which posts cannot be submitted or edited:
+- New app + old database: `submit_content` and `reopen_content` do not exist, so submit and reopen fail (clear error, nothing is written).
+- Old app + new database: the old app writes `status` and `approval_id` directly, which the content guard refuses, so submit and edit of social posts fail (clear error, nothing is written).
+Sequence for a rollback: (1) announce a short pause for social posts and approvals, (2) deploy the previous app commit, (3) run the rollback SQL above straight after, (4) confirm a draft can be created, edited and submitted. For a roll-forward, do the reverse: apply the migration, then deploy the app within minutes.
+Nothing is corrupted in either window; the cost is a few minutes in which social post submit and edit fail. Sign-in, customers, retailers, products, tasks, orders and reports are unaffected throughout.
 
 ## 7. Independent security review: what changed and what did not
 
@@ -167,15 +177,22 @@ It found six weaknesses that were approved for fixing, and others that were not.
 | F6 | The title and topic were not scanned (a post titled "100% guaranteed waterproof" went through). | Both are scanned at submission; at approval the post's title and topic and the approval's title are scanned too. App: same early check. |
 | F12 | A post whose preview exceeded the approval limit (many hashtags) failed on a table check with the same error code as a claims refusal. | A clear refusal ("too long to send for approval", limit 6000) from the database, and an early message in the app. |
 
-**Not changed in this pass** (open; each needs a decision or a separate approval):
-- F2: claim protection covers content approvals only, and the classification (type or generator) is chosen by the writer for approvals that do not belong to a post. Decide before M4/M6.
-- F7: rows that existed before the migration are not revalidated. Run the two read-only audit queries from the review on any database that holds data before applying.
-- F8: rollback ordering (see section 6).
-- F9: locked wording is a list of columns; the planned date stays editable on approved posts; a column added later is unlocked unless the guard is updated.
-- F10: concurrency is reasoned about, not tested (single connection); `content_items.approval_id` has no unique index (a schema change).
-- F11: owner or admin deletion of a post is unlogged.
-- F13, F14: ownership and hosted behaviour of the definer functions and `begin/commit` under the CLI are for the staging run to confirm.
-- F15: `created_by` of a new post can be set by the writer (existing behaviour; a schema/policy decision).
+**Fixed in the second pass** (database tests, app tests where relevant, 8 more checks in the staging script, and mutation-checked: each fix undone, tests fail):
+
+| Finding | Problem | Fix |
+|---|---|---|
+| F2 | The claim rules applied only to approvals that looked like content; type and generator are chosen by whoever inserts an approval. | `decide_approval` now scans every approval it approves, whatever its type. The app's early check does the same. Rejecting is unaffected. **Consequence:** a non-content approval (for example a retailer message) that contains a price, an offer, a stock or material claim now needs its wording changed before it can be approved. There is still no trusted allowed-claims list. |
+| F9 | The locked wording was a list of columns, so a column added later would have been left open. | The guard compares the whole row except the planned date, so new columns are locked by default. The planned date stays editable on purpose (calendar planning). |
+| F10 | One approval could be linked to two posts (no unique index). | Unique partial index on `content_items (approval_id)`. The migration fails to apply if existing data already breaks this; the audit file finds it first. |
+| F11 | Owner or admin deletion of a post left no trace. | A delete trigger writes an `agent_activity` row with the person and the status the post had. Skipped when a whole organisation is deleted. |
+| F15 | The creator of a new post could be set by the writer. | A before-insert trigger records the signed-in caller, whatever the request sends. |
+| F7 | Rows that existed before the migration were not revalidated. | Not auto-repaired (that would rewrite data). New read-only `docs/security_hardening_preapply_audit.sql` finds them; run it before applying to any database with data. |
+| F8 | Rollback ordering. | Documented sequence and the exact failure window (section 6). No data corruption is possible in either window. |
+
+**Still open** (cannot be closed from code alone):
+- F10, concurrency: true simultaneous sessions are still not tested locally (one connection). Row locks and the new unique index make the outcome safe by design; the two-session check in `docs/STAGING_SETUP_AND_VERIFICATION.md` section 7 is the proof and is NOT RUN.
+- F13, F14: ownership of the definer functions and `begin/commit` under the Supabase CLI can only be confirmed on a real staging project.
+- F2 (residual): no trusted source of client-approved claims exists, so the rules are absolute. That needs a client decision and a schema change, and is not in the frozen scope.
 - The activity table still allows free-text lines without a reference; only rows that point at a post or an approval are reserved.
 
 **Side effect on the demo.** The shared claim check (`findProhibitedClaims`) now normalises text, so the demo's own guard also catches the disguised spellings and now sees phrases split across line breaks or extra spaces.

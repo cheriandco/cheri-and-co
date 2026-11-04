@@ -201,10 +201,16 @@ describe("S1: decide_approval enforces the claims whatever the caller sends", ()
     expect((await get(p)).status).toBe("rejected");
   });
 
-  it("approvals that are not content are not blocked, even with a price in them", async () => {
+  it("F2: every approval is scanned, whatever type or generator its writer chose; a clean one of any type still passes", async () => {
     const id = uid(3);
     await db.exec(`insert into public.approvals (id, org_id, title, type, generated_by, preview, meta) values ('${id}', '${ORG_A}', 'Reply', 'B2C reply', 'b2c', 'The bracelet is ₹499, 50% off, waterproof', '{"kind":"b2c_reply"}')`);
-    expect((await as(U.approverA, () => rows(`select status from public.decide_approval('${id}', 'approve')`)))[0].status).toBe("approved");
+    expect(await as(U.approverA, () => fails(`select public.decide_approval('${id}', 'approve')`))).toMatch(/prohibited claims/);
+    expect((await approvalOf(id)).status).toBe("pending");
+    await as(U.approverA, () => db.query(`select public.decide_approval('${id}', 'reject')`)); // rejecting is always possible
+    expect((await approvalOf(id)).status).toBe("rejected");
+    const clean = uid(3);
+    await db.exec(`insert into public.approvals (id, org_id, title, type, generated_by, preview, meta) values ('${clean}', '${ORG_A}', 'Reply', 'B2C reply', 'b2c', 'Thank you for your message, we will reply soon', null)`);
+    expect((await as(U.approverA, () => rows(`select status from public.decide_approval('${clean}', 'approve')`)))[0].status).toBe("approved");
   });
 
   it("roles are unchanged: only owner, admin and approver decide; staff, viewer, strangers and visitors cannot", async () => {
@@ -689,6 +695,59 @@ describe("F12: a post that is too long to approve gets a plain refusal", () => {
 });
 
 /* ------------------------------------------------------------------ regression */
+describe("F2, F9, F10, F11, F15: the remaining review items that the database can enforce", () => {
+  it("F9: every column except the planned date is locked on pending, approved and published posts, including columns added later", async () => {
+    const { p } = await submitted();
+    await db.exec("alter table public.content_items add column internal_note text");
+    try {
+      expect(await as(U.staffA, () => fails(`update public.content_items set internal_note = 'x' where id = '${p}'`))).toMatch(/locked while it is pending approval/);
+      await as(U.staffA, () => db.query(`update public.content_items set scheduled_for = '2026-12-02' where id = '${p}'`));
+      expect((await rows(`select scheduled_for::text d from public.content_items where id = '${p}'`))[0].d).toBe("2026-12-02");
+      const draft = await post();
+      await as(U.staffA, () => db.query(`update public.content_items set internal_note = 'ok' where id = '${draft}'`));
+    } finally { await db.exec("alter table public.content_items drop column internal_note"); }
+  });
+
+  it("F10: an approval can belong to only one post", async () => {
+    const { a } = await submitted();
+    const other = await post();
+    expect(await fails(`update public.content_items set status = 'pending_approval', approval_id = '${a}' where id = '${other}'`)).toMatch(/content_items_approval_id_key|duplicate key/);
+    await post(); await post(); // many posts without an approval are fine
+  });
+
+  it("F11: deleting a post is recorded with the person who did it, and only owner or admin can delete", async () => {
+    const p = await post({ title: "To delete", status: "approved" });
+    await as(U.staffA, () => db.query(`delete from public.content_items where id = '${p}'`));
+    expect(await get(p)).toBeTruthy();
+    await as(U.adminA, () => db.query(`delete from public.content_items where id = '${p}'`));
+    expect(await get(p)).toBeUndefined();
+    const log = await rows(`select action, actor_id, agent from public.agent_activity where ref_type = 'content_item' and ref_id = '${p}' order by id desc limit 1`);
+    expect(log[0]).toMatchObject({ actor_id: U.adminA, agent: "content" });
+    expect(String(log[0].action)).toContain('Deleted "To delete"');
+    expect(String(log[0].action)).toContain("was approved");
+  });
+
+  it("F11: deleting a whole organisation still works (the delete log is skipped, no broken reference)", async () => {
+    const org = "dddddddd-0000-0000-0000-000000000009";
+    await db.exec(`insert into public.organizations (id, name) values ('${org}', 'Temp'); insert into public.content_items (org_id, platform, title) values ('${org}', 'Instagram', 'gone')`);
+    await db.exec(`delete from public.organizations where id = '${org}'`);
+    expect((await rows(`select count(*)::int n from public.content_items where org_id = '${org}'`))[0].n).toBe(0);
+  });
+
+  it("F11: the delete-log function is not callable by signed-in users", async () => {
+    expect(await as(U.ownerA, () => fails("select private.content_items_log_delete()"))).toMatch(/permission denied|trigger/);
+  });
+
+  it("F15: a new post always records the signed-in caller as its creator, whatever the request says", async () => {
+    const forged = uid(7);
+    await as(U.staffA, () => db.query(`insert into public.content_items (id, org_id, platform, title, created_by) values ('${forged}', '${ORG_A}', 'Instagram', 'x', '${U.ownerA}')`));
+    expect((await get(forged)).created_by).toBe(U.staffA);
+    const none = uid(7);
+    await as(U.staffA, () => db.query(`insert into public.content_items (id, org_id, platform, title, created_by) values ('${none}', '${ORG_A}', 'Instagram', 'y', null)`));
+    expect((await get(none)).created_by).toBe(U.staffA);
+  });
+});
+
 describe("foundation guarantees still hold with the hardening migration applied", () => {
   it("RLS is on for every public table and visitors get no access", async () => {
     expect(await rows("select relname from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r' and not c.relrowsecurity")).toEqual([]);
@@ -722,7 +781,7 @@ describe("foundation guarantees still hold with the hardening migration applied"
       await fresh.exec(readFileSync("supabase/migrations/20261101000000_foundation.sql", "utf8"));
       await fresh.exec(HARDENING);
       await fresh.exec(HARDENING);
-      expect((await fresh.query("select count(*)::int n from pg_trigger where tgname in ('content_items_guard','approvals_meta_guard')")).rows[0]).toEqual({ n: 2 });
+      expect((await fresh.query("select count(*)::int n from pg_trigger where tgname in ('content_items_guard','approvals_meta_guard','content_items_set_creator','content_items_log_delete')")).rows[0]).toEqual({ n: 4 });
     } finally { await fresh.close(); }
   });
   it("the hardening migration is transaction-wrapped and does not touch the foundation migration", () => {

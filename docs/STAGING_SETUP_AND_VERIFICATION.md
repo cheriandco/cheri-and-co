@@ -53,6 +53,7 @@ Required variables for a staging build (names only; values come from the staging
 ## 3. Applying the migrations to staging (after approval only)
 
 Apply in this order to the **empty** staging project. Both files are forward-only; the foundation file is never edited.
+On any project that already holds data, first run the read-only `docs/security_hardening_preapply_audit.sql`: every query must return no rows (query A3 would make the second migration fail).
 
 1. `supabase/migrations/20261101000000_foundation.sql`
 2. `supabase/migrations/20261104000000_security_hardening.sql`
@@ -126,7 +127,7 @@ Report the three kinds separately. A passing local test is never recorded as a h
 | Script | What it proves on the hosted service |
 |---|---|
 | `docs/rls_live_check.sql` | RLS on every table, tenant isolation, roles, approvals, audit append-only (existing script; re-run because Slices 2 to 4 were built after its only recorded run) |
-| `docs/security_hardening_live_check.sql` | The claims guard inside `decide_approval()` (including look-alike spellings, titles and topics), locked content, `submit_content`/`reopen_content`, stranded approvals, the refusal to edit a post's approval, reserved activity history, the length limit, role and isolation checks on the new functions (73 checks) |
+| `docs/security_hardening_live_check.sql` | The claims guard inside `decide_approval()` (including look-alike spellings, titles and topics), locked content, `submit_content`/`reopen_content`, stranded approvals, the refusal to edit a post's approval, reserved activity history, the length limit, whole-row locking, the one-approval-one-post index, deletion logging, the recorded creator, role and isolation checks on the new functions (81 checks) |
 
 How to run each: paste the whole file into the **staging** SQL Editor and click Run once. Each ends with ROLLBACK, leaves nothing behind, and shows a table whose first
 row says `ALL n CHECKS PASSED` or `k OF n CHECKS FAILED`. Keep a screenshot or the exported result with the date. If the editor shows only "Success. No rows returned", it displayed the

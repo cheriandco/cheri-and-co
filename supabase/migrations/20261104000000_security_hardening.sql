@@ -3,7 +3,7 @@
 -- STATUS: NOT APPLIED to any Supabase project. Tested only against a local in-process Postgres (tests/security-hardening.test.ts).
 -- Apply to a STAGING project first (docs/STAGING_SETUP_AND_VERIFICATION.md), then production only after review.
 --
--- S1  Prohibited claims are enforced inside decide_approval(), so calling the function directly cannot bypass the check.
+-- S1  Prohibited claims (every approval, whatever its type) are enforced inside decide_approval(), so calling the function directly cannot bypass the check.
 -- S2  Content that is pending approval, approved or published cannot be changed directly. The status and the approval link
 --     change only through three controlled functions: submit_content(), decide_approval() and reopen_content().
 --
@@ -85,10 +85,10 @@ begin
   if new.status is distinct from old.status or new.approval_id is distinct from old.approval_id then
     raise exception 'status and approval link change only through submit_content, decide_approval and reopen_content' using errcode = '42501';
   end if;
+  -- While pending, approved or published, EVERY column except the planned date is locked. Written as "the whole row minus the
+  -- planned date" so a column added later is locked by default instead of silently left open.
   if old.status in ('pending_approval', 'approved', 'published')
-     and (new.platform is distinct from old.platform or new.title is distinct from old.title or new.topic is distinct from old.topic
-          or new.caption is distinct from old.caption or new.hashtags is distinct from old.hashtags
-          or new.creative_brief is distinct from old.creative_brief or new.image_direction is distinct from old.image_direction) then
+     and (to_jsonb(new) - 'scheduled_for') is distinct from (to_jsonb(old) - 'scheduled_for') then
     raise exception 'this content is locked while it is pending approval, approved or published; reopen it first' using errcode = '42501';
   end if;
   return new;
@@ -98,6 +98,44 @@ $$;
 drop trigger if exists content_items_guard on public.content_items;
 create trigger content_items_guard before update on public.content_items
   for each row execute function private.content_items_guard();
+
+-- A new post records the signed-in caller as its creator, whatever the request says (the column default alone could be overridden).
+create or replace function private.content_items_set_creator() returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+  if current_user in ('authenticated', 'anon') then
+    new.created_by := (select auth.uid());
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists content_items_set_creator on public.content_items;
+create trigger content_items_set_creator before insert on public.content_items
+  for each row execute function private.content_items_set_creator();
+
+-- One approval belongs to at most one post. (Fails to apply if existing data already links two posts to one approval; the
+-- pre-apply audit in docs/security_hardening_preapply_audit.sql finds those.)
+create unique index if not exists content_items_approval_id_key on public.content_items (approval_id) where approval_id is not null;
+
+-- Deleting a post (owner or admin only, by the existing policy) is recorded. Skipped when the whole organisation is being deleted.
+create or replace function private.content_items_log_delete() returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  insert into public.agent_activity (org_id, agent, action, ref_type, ref_id, actor_id)
+  select old.org_id, 'content', left('Deleted "' || old.title || '" (' || old.platform || ', was ' || old.status || ')', 500),
+         'content_item', old.id, (select auth.uid())
+  where exists (select 1 from public.organizations o where o.id = old.org_id);
+  return old;
+end;
+$$;
+revoke all on function private.content_items_log_delete() from public, anon, authenticated;
+
+drop trigger if exists content_items_log_delete on public.content_items;
+create trigger content_items_log_delete after delete on public.content_items
+  for each row execute function private.content_items_log_delete();
 
 -- A new post starts as a plain draft with no approval, so nobody can insert a row that already looks approved.
 alter policy content_items_insert on public.content_items
@@ -292,7 +330,9 @@ begin
     post_follows := false;
   end if;
 
-  if p_action = 'approve' and (has_post or a.generated_by = 'content' or a.type = 'Content') then
+  -- Every approval is scanned, not only content ones: the type and generator are chosen by whoever inserts the approval, so they
+  -- cannot decide whether the rules apply.
+  if p_action = 'approve' then
     hits := private.find_prohibited_claims(
       concat_ws(E'\n', a.title, a.preview,
         case when has_post then concat_ws(E'\n', c.title, c.topic, c.caption, array_to_string(c.hashtags, ' '), c.creative_brief, c.image_direction) end));
