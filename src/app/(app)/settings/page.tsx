@@ -2,21 +2,29 @@ import type { Metadata } from "next";
 import { getAgents, getCurrentUser } from "@/services";
 import { authRequired } from "@/lib/auth/mode";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { amazonConfigStatus, describeConfigProblem } from "@/lib/amazon/config";
 import { PageHeader, DashboardCard, SectionHeader, StatusBadge } from "@/components/ui";
 
 export const metadata: Metadata = { title: "Settings" };
 
 /** Honest status. A real (non-demo) organisation reads its own tasks, approvals, customers, retailers, leads, products, content posts and orders from the database;
- *  B2C Sales and Amazon Intelligence have no data source yet; sample data is shown only to demo organisations. */
+ *  B2C Sales has no data source yet; Amazon Intelligence reads the seller account when configured; sample data is shown only to demo organisations. */
 function supabaseStatus(): string {
-  if (authRequired()) return "Sign-in and organisation access active. A real organisation's tasks, approvals, customers, retailers, leads, products, content posts and orders come from the database; B2C Sales and Amazon Intelligence are not connected yet. Sample data is shown only to demo organisations";
+  if (authRequired()) return "Sign-in and organisation access active. A real organisation's tasks, approvals, customers, retailers, leads, products, content posts and orders come from the database; B2C Sales is not connected yet, and Amazon Intelligence reads the Amazon seller account once it is configured. Sample data is shown only to demo organisations";
   if (isSupabaseConfigured()) return "Configured, but sign-in is off (demo mode). Agent data is SAMPLE data";
   return "Not connected — mock data active";
 }
 
+/** Names missing variables, never values. */
+function amazonStatus(): string {
+  const s = amazonConfigStatus();
+  if (!s.ok) return describeConfigProblem(s);
+  return s.config.environment === "sandbox" ? "Configured for the Amazon SANDBOX (simulated test data). Read-only." : "Configured for Amazon production. Read-only; nothing is changed on Amazon.";
+}
+
 const integrations = (): string[][] => [
   ["Instagram", "Not connected (demo)", ""], ["Supabase (accounts and database)", supabaseStatus(), ""],
-  ["Amazon Seller data", "Not connected", ""], ["Anthropic Claude (API)", "Not connected — drafts use templates. Needs an Anthropic Console API key; a Claude Team plan alone is not API access", ""],
+  ["Amazon Seller data (SP-API, read-only)", amazonStatus(), ""], ["Anthropic Claude (API)", "Not connected — drafts use templates. Needs an Anthropic Console API key; a Claude Team plan alone is not API access", ""],
   ["Canva", "Not connected — design briefs only", ""],
 ];
 

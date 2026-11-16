@@ -1,0 +1,14 @@
+{
+  "_provenance": "DOCUMENTATION-DERIVED, hand-written from the published FBA Inventory v1 model. NOT captured from Amazon.",
+  "payload": {
+    "granularity": { "granularityType": "Marketplace", "granularityId": "A21TJRUUN4KGV" },
+    "inventorySummaries": [
+      { "asin": "B000TEST01", "fnSku": "X001", "sellerSku": "SKU-1", "productName": "Test Ring", "lastUpdatedTime": "2026-11-10T00:00:00Z", "totalQuantity": 12,
+        "inventoryDetails": { "fulfillableQuantity": 4, "inboundWorkingQuantity": 0, "inboundShippedQuantity": 3, "inboundReceivingQuantity": 0,
+          "reservedQuantity": { "totalReservedQuantity": 1 }, "unfulfillableQuantity": { "totalUnfulfillableQuantity": 4 }, "researchingQuantity": { "totalResearchingQuantity": 0 } } },
+      { "sellerSku": "SKU-3", "totalQuantity": 50, "inventoryDetails": { "fulfillableQuantity": 50 } },
+      { "asin": "no-sku-so-dropped" }
+    ]
+  },
+  "pagination": { "nextToken": "INV-2" }
+}

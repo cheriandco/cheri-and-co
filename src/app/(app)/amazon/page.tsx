@@ -1,5 +1,6 @@
 import { isLiveOrg } from "@/lib/auth/access";
-import { NotConnected } from "@/components/not-connected";
+import { AmazonLive } from "@/components/amazon-live-view";
+import { getAmazonLive } from "@/services/amazon-live";
 import type { Metadata } from "next";
 import { getActionLinks, getAmazon } from "@/services";
 import { pricePosition } from "@/lib/agent-logic";
@@ -12,8 +13,9 @@ export const metadata: Metadata = { title: "Amazon Intelligence" };
 const TABS = ["overview", "products", "competitors", "reviews", "pricing", "opportunities", "listings", "recommendations"].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) }));
 
 export default async function AmazonPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
-  if (await isLiveOrg()) return <NotConnected title="Amazon Intelligence" />;
   const { tab = "overview" } = await searchParams;
+  // Live organisations get their own Amazon data (or an honest "not connected" state). Sample data is never shown to them.
+  if (await isLiveOrg()) return <AmazonLive view={await getAmazonLive()} tab={tab} />;
   const [a, links] = await Promise.all([getAmazon(), getActionLinks()]);
   const top = [...a.rows].sort((x, y) => y.opportunity - x.opportunity);
   const ourPriceFor = (rank: string) => a.pricing.find((p) => (/Necklace/i.test(rank) && /Necklace/i.test(p.product)) || (/Earring/i.test(rank) && /Earring/i.test(p.product)) || (/Anklet/i.test(rank) && /Anklet/i.test(p.product)))?.ourPrice;

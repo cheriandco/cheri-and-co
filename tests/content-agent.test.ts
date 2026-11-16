@@ -426,7 +426,9 @@ describe("no live integrations or publishing in source", () => {
   });
 
   it("has no Canva API, Instagram Graph or marketplace publishing call", () => {
-    expect(text(/api\.canva\.com|graph\.facebook\.com|graph\.instagram\.com|sellingpartnerapi|mws\.amazon|flipkart\.net/i)).toEqual([]);
+    expect(text(/api\.canva\.com|graph\.facebook\.com|graph\.instagram\.com|mws\.amazon|flipkart\.net/i)).toEqual([]);
+    // M5: the read-only Amazon Intelligence client may name the SP-API hosts, and nowhere else may.
+    expect(text(/sellingpartnerapi/i).filter((f) => !/[\\/]src[\\/]lib[\\/]amazon[\\/]/.test(f))).toEqual([]);
   });
 
   it("does not use fetch outside the dashboard's own routes", () => {

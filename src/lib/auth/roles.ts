@@ -13,6 +13,8 @@ export const PERMISSIONS = [
   "agents:run",
   "content:submit",
   "approvals:decide",
+  /** Amazon Intelligence: connect and run synchronisation. Owner and admin only (it spends Amazon API quota). */
+  "amazon:sync",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -27,6 +29,7 @@ const MATRIX: Record<Permission, readonly Role[]> = {
   "agents:run": WRITERS,
   "content:submit": WRITERS,
   "approvals:decide": ["owner", "admin", "approver"],
+  "amazon:sync": ["owner", "admin"],
 };
 
 export const isRole = (v: unknown): v is Role => typeof v === "string" && (ROLES as readonly string[]).includes(v);

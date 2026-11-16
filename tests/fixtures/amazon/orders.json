@@ -1,0 +1,19 @@
+{
+  "_provenance": "DOCUMENTATION-DERIVED, hand-written from the published Orders v2026-01-01 model. Not captured from Amazon. Includes buyer/recipient blocks on purpose to prove the mapper drops them.",
+  "orders": [
+    {
+      "orderId": "171-0000000-0000001",
+      "createdTime": "2026-11-01T05:00:00Z",
+      "lastUpdatedTime": "2026-11-01T06:00:00Z",
+      "salesChannel": { "marketplaceId": "A21TJRUUN4KGV", "channelName": "Amazon.in" },
+      "fulfillment": { "fulfillmentStatus": "SHIPPED", "fulfilledBy": "MERCHANT" },
+      "buyer": { "buyerName": "Test Buyer", "buyerEmail": "buyer@example.com" },
+      "recipient": { "deliveryAddress": { "name": "Test Buyer", "addressLine1": "1 Test Road" } },
+      "orderItems": [
+        { "orderItemId": "1", "quantityOrdered": 2, "product": { "asin": "B000TEST01", "sellerSku": "SKU-1", "title": "Test Item", "price": { "unitPrice": { "amount": "499.00", "currencyCode": "INR" } } } }
+      ]
+    },
+    { "orderId": "missing-times" }
+  ],
+  "pagination": { "nextToken": "TOKEN-2" }
+}

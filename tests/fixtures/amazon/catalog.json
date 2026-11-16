@@ -1,0 +1,11 @@
+{
+  "_provenance": "DOCUMENTATION-DERIVED, hand-written from the published Catalog Items 2022-04-01 model. NOT captured from Amazon.",
+  "items": [
+    {
+      "asin": "B000TEST01",
+      "summaries": [{ "marketplaceId": "A21TJRUUN4KGV", "brand": "Cheri", "itemName": "Test Ring", "productType": "JEWELLERY" }],
+      "salesRanks": [{ "marketplaceId": "A21TJRUUN4KGV", "classificationRanks": [{ "title": "Rings", "rank": 120 }] }],
+      "images": [{ "marketplaceId": "A21TJRUUN4KGV", "images": [{ "variant": "MAIN", "link": "https://m.media-amazon.com/x.jpg" }] }]
+    }
+  ]
+}

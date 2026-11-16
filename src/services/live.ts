@@ -132,7 +132,7 @@ export async function liveDecideApproval(id: string, action: "approve" | "reject
   if (action === "approve") {
     const { data } = await supabase.from("approvals").select("preview, meta").eq("org_id", orgId).eq("id", id).maybeSingle();
     const row = data as { preview: string; meta: { kind?: string; allowedClaims?: string[] } | null } | null;
-    if (row?.meta?.kind === "content_draft" || row?.meta?.kind === "b2b_followup" || row?.meta?.kind === "b2c_followup") {
+    if (row?.meta?.kind === "content_draft" || row?.meta?.kind === "b2b_followup" || row?.meta?.kind === "b2c_followup" || row?.meta?.kind === "amazon_insight") {
       const violations = findProhibitedClaims(row.preview, row.meta.allowedClaims ?? []);
       if (violations.length) return { ok: false, reason: "prohibited_claims", detail: violations.map((v) => `${v.label}: "${v.match}"`) };
     }

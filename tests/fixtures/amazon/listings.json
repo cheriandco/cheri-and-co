@@ -1,0 +1,20 @@
+{
+  "_provenance": "DOCUMENTATION-DERIVED, hand-written from the published Listings Items 2021-08-01 model. NOT captured from Amazon.",
+  "items": [
+    {
+      "sku": "SKU-1",
+      "summaries": [{ "marketplaceId": "A21TJRUUN4KGV", "asin": "B000TEST01", "productType": "JEWELLERY", "itemName": "Test Ring", "status": ["BUYABLE"], "mainImage": { "link": "https://example.com/a.jpg" }, "createdDate": "2026-09-01T00:00:00Z", "lastUpdatedDate": "2026-10-01T00:00:00Z" }],
+      "issues": [],
+      "offers": [{ "marketplaceId": "A21TJRUUN4KGV", "price": { "amount": "499.00", "currencyCode": "INR" } }],
+      "fulfillmentAvailability": [{ "fulfillmentChannelCode": "DEFAULT", "quantity": 5 }]
+    },
+    {
+      "sku": "SKU-2",
+      "summaries": [{ "marketplaceId": "A21TJRUUN4KGV", "asin": "B000TEST02", "productType": "JEWELLERY", "itemName": "Test Chain", "status": ["DISCOVERABLE"] }],
+      "issues": [{ "code": "90220", "severity": "ERROR", "message": "Missing required attribute" }, { "code": "8541", "severity": "WARNING", "message": "Image too small" }],
+      "offers": [],
+      "fulfillmentAvailability": []
+    }
+  ],
+  "pagination": {}
+}

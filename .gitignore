@@ -3,3 +3,6 @@ node_modules
 .env*.local
 next-env.d.ts
 *.tsbuildinfo
+
+# Amazon sandbox captures: review and redact before committing (docs/M5_SANDBOX_CONTRACT.md)
+tests/fixtures/amazon/captured/

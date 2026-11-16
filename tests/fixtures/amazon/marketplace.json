@@ -1,0 +1,7 @@
+{
+  "_provenance": "DOCUMENTATION-DERIVED, hand-written from the published Sellers v1 model. NOT captured from Amazon. The id/country pairing is Amazon's documented value for India; the live check is what confirms it for this account.",
+  "payload": [
+    { "marketplace": { "id": "A21TJRUUN4KGV", "name": "Amazon.in", "countryCode": "IN", "defaultCurrencyCode": "INR", "defaultLanguageCode": "en_IN", "domainName": "www.amazon.in" },
+      "participation": { "isParticipating": true, "hasSuspendedListings": false }, "storeName": "Test Store" }
+  ]
+}
