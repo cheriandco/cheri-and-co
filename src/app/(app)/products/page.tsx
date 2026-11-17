@@ -5,13 +5,17 @@ import { can } from "@/lib/auth/roles";
 import { getAuthUser } from "@/lib/auth/session";
 import { getProducts } from "@/services";
 import { ProductForm } from "@/components/product-form";
+import { ProductRowActions } from "@/components/product-row-actions";
+import type { Product } from "@/types";
 import { PageHeader, DashboardCard, DataTable, Money, SectionHeader, StatusBadge } from "@/components/ui";
 
 export const metadata: Metadata = { title: "Products" };
 
 export default async function ProductsPage() {
   const live = await isLiveOrg();
-  const canWrite = live && can((await getAuthUser())?.role, "products:write");
+  const role = (await getAuthUser())?.role;
+  const canWrite = live && can(role, "products:write");
+  const canDelete = live && can(role, "products:delete");
   const products = await getProducts();
   return (
     <div className="stack">
@@ -28,6 +32,7 @@ export default async function ProductsPage() {
             { header: "Stock", cell: (p) => <span className="num">{p.stock ?? "—"}</span> },
             { header: "Channels", cell: (p) => p.channels.map((c) => <span className="tag" key={c}>{c}</span>) },
             { header: "Status", cell: (p) => <StatusBadge status={p.status} /> },
+            ...(canWrite || canDelete ? [{ header: "Actions", cell: (p: Product) => <ProductRowActions id={p.id} name={p.name} canEdit={canWrite} canDelete={canDelete} /> }] : []),
           ]}
         />
       </DashboardCard>

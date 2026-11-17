@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   rpcCalls: [] as { fn: string; args: Record<string, unknown> }[],
   rpcResult: { data: null, error: null } as { data: unknown; error: { code?: string; message: string } | null },
   insertError: null as { code?: string; message: string } | null,
+  deleteError: null as { code?: string; message: string } | null,
   /** Makes a matching update fail with an error, or match no rows when it returns "empty". */
   /** Emulates the API's max-rows setting (1000 by default): no response carries more rows than this, whatever the query asks for. */
   maxRows: 1000,
@@ -29,6 +30,7 @@ vi.mock("@/lib/supabase/server", () => ({
         select: () => q,
         insert: (payload: Row) => { call.op = "insert"; call.payload = payload; return q; },
         update: (payload: Row) => { call.op = "update"; call.payload = payload; return q; },
+        delete: () => { call.op = "delete"; return q; },
         eq: (k: string, v: unknown) => { call.eq[k] = v; return q; },
         // .not() and .gte() are recorded as "not:col" / "gte:col" and applied below, so the tests can see the filters
         not: (k: string, op: string, v: unknown) => { call.eq[`not:${k}`] = `${op} ${String(v)}`; return q; },
@@ -39,6 +41,7 @@ vi.mock("@/lib/supabase/server", () => ({
         maybeSingle: () => { single = true; return q; },
         then: (resolve: (v: { data: unknown; error: unknown }) => void) => {
           if (call.op === "insert" && h.insertError) return resolve({ data: null, error: h.insertError });
+          if (call.op === "delete" && h.deleteError) return resolve({ data: null, error: h.deleteError });
           const fault = call.op === "update" ? h.updateFault?.(table, call.payload ?? {}) : null;
           if (fault === "empty") return resolve({ data: single ? null : [], error: null });
           if (fault) return resolve({ data: null, error: fault });
@@ -50,6 +53,7 @@ vi.mock("@/lib/supabase/server", () => ({
               const col = k.slice(4), [op, arg] = String(v).split(/ (.*)/s);
               return op === "is" ? r[col] !== null && r[col] !== undefined : !arg.slice(1, -1).split(",").includes(String(r[col]));
             })).map((r) => (call.op === "update" ? { ...r, ...call.payload } : r));
+          if (call.op === "delete") h.tables[table] = all.filter((r) => !rows.includes(r)); // the matched rows are removed, like the real table
           const paged = (call.range ? rows.slice(call.range[0], call.range[1] + 1) : rows).slice(0, h.maxRows);
           resolve({ data: single ? (rows[0] ?? null) : paged, error: null });
         },
@@ -74,7 +78,7 @@ beforeEach(() => {
   vi.stubEnv("AUTH_MODE", "required");
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.invalid");
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon-test");
-  h.calls.length = 0; h.rpcCalls.length = 0; h.insertError = null; h.updateFault = null; h.maxRows = 1000;
+  h.calls.length = 0; h.rpcCalls.length = 0; h.insertError = null; h.deleteError = null; h.updateFault = null; h.maxRows = 1000;
   h.rpcResult = { data: null, error: null };
   h.tables = {
     tasks: [{ id: "t1", org_id: ORG, title: "Call Asha", source: "CRM & Sales Ops Agent", due_at: null, priority: "high", status: "open", assignee_id: null, related_ref: null },
@@ -359,7 +363,7 @@ describe("slice 2: validation and mapping helpers", () => {
 });
 
 /* ---------- Slice 3: products and content items (fake client: proves app logic, not the real database) ---------- */
-import { PATCH as patchResource } from "@/app/api/[resource]/[id]/route";
+import { DELETE as deleteResource, PATCH as patchResource } from "@/app/api/[resource]/[id]/route";
 import { POST as postSocial } from "@/app/api/social/posts/route";
 import { POST as postSocialAction } from "@/app/api/social/posts/[id]/[action]/route";
 import { createProduct, getProduct, getProducts, getSocialPosts, updateProduct } from "@/services";
@@ -376,6 +380,7 @@ const json = { host: "app.test", origin: "https://app.test", "content-type": "ap
 const jreq = (method: string, url: string, body?: unknown) => new Request(url, { method, headers: json, body: body === undefined ? undefined : JSON.stringify(body) });
 const postProduct = (body: unknown) => postResource(jreq("POST", "https://app.test/api/products", body), { params: Promise.resolve({ resource: "products" }) });
 const patchProduct = (id: string, body: unknown) => patchResource(jreq("PATCH", `https://app.test/api/products/${id}`, body), { params: Promise.resolve({ resource: "products", id }) });
+const deleteProduct = (id: string, resource = "products") => deleteResource(jreq("DELETE", `https://app.test/api/${resource}/${id}`), { params: Promise.resolve({ resource, id }) });
 const postAction = (id: string, action: string, body?: unknown) => postSocialAction(jreq("POST", `https://app.test/api/social/posts/${id}/${action}`, body), { params: Promise.resolve({ id, action }) });
 const setRole = (role: string) => { h.tables.memberships = [{ user_id: "u1", org_id: ORG, role, organizations: { is_demo: false } }]; };
 
@@ -456,6 +461,41 @@ describe("slice 3: live products", () => {
   it("a database refusal (RLS) becomes a 403", async () => {
     h.insertError = { code: "42501", message: "new row violates row-level security policy" };
     expect((await postProduct({ sku: "S", name: "N" })).status).toBe(403);
+  });
+  it("deletes a product only inside the organisation, scoped by organisation and id, and logs it", async () => {
+    h.calls.length = 0;
+    const res = await deleteProduct(P1);
+    expect(res.status).toBe(200);
+    const del = h.calls.find((c) => c.table === "products" && c.op === "delete")!;
+    expect(del.eq).toEqual({ org_id: ORG, id: P1 });
+    expect((h.tables.products ?? []).map((r) => r.id)).toEqual([P_OTHER]); // the other organisation's row is untouched
+    expect(h.calls.some((c) => c.table === "agent_activity" && c.op === "insert" && String(c.payload?.action).startsWith("Deleted product: Mini hoop"))).toBe(true);
+  });
+  it("cannot delete another organisation's product, an unknown id or a malformed id (404, nothing removed)", async () => {
+    expect((await deleteProduct(P_OTHER)).status).toBe(404);
+    expect((await deleteProduct("not-a-uuid")).status).toBe(404);
+    expect((h.tables.products ?? []).length).toBe(2);
+  });
+  it("only owner and admin may delete; approver, staff and viewer get 403 and nothing is removed", async () => {
+    for (const role of ["approver", "staff", "viewer"]) {
+      setRole(role);
+      h.calls.length = 0;
+      expect((await deleteProduct(P1)).status, role).toBe(403);
+      expect(h.calls.some((c) => c.op === "delete"), role).toBe(false);
+    }
+    expect((h.tables.products ?? []).length).toBe(2);
+    setRole("admin");
+    expect((await deleteProduct(P1)).status).toBe(200);
+  });
+  it("a database refusal on delete becomes a 403 and only products can be deleted here", async () => {
+    h.deleteError = { code: "42501", message: "permission denied for table products" };
+    expect((await deleteProduct(P1)).status).toBe(403);
+    expect((await deleteProduct(P1, "customers")).status).toBe(404);
+    expect((h.tables.products ?? []).length).toBe(2);
+  });
+  it("a demo organisation cannot delete from the sample catalogue", async () => {
+    setMembership(true);
+    expect((await deleteProduct(P1)).status).toBe(404);
   });
   it("a demo organisation keeps the sample catalogue and cannot create or edit", async () => {
     setMembership(true);

@@ -165,6 +165,10 @@ export interface ContentApprovalMeta {
   /** Set on agent suggestions (kind "b2b_followup"): which agent drafted it and the record it is about. */
   agent?: string;
   ref?: string;
+  /** Set on content drafts whose text parts were written by an AI model (a person still approves them). */
+  aiAssisted?: boolean;
+  aiModel?: string;
+  aiPromptVersion?: string;
 }
 
 export interface Approval {

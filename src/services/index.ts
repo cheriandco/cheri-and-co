@@ -8,6 +8,9 @@ import { getAuthUser } from "@/lib/auth/session";
 import { CONTENT_SAMPLE_NOTE, contentPacks, contentProducts } from "@/mocks/content-samples";
 import { findProhibitedClaims } from "@/lib/content-agent/claims";
 import { runContentAgent, type ContentRunInput } from "@/lib/content-agent";
+import { runContentAgentFromParts } from "@/lib/content-agent/ai";
+import { LIVE_CONTENT_NOTE, liveContentProducts } from "@/lib/content-agent/live-source";
+import { aiPartsAllowed } from "./content-ai";
 import { DISCOVERY_NOTE, discoveryCandidates, type DiscoveryCandidate } from "@/mocks/agent-samples";
 import { amazonActionFor, buildSuggestions, followUpEmail, scoreCandidate, suggestedReplyFor, temperatureFor, type Suggestion } from "@/lib/agent-logic";
 import { AGENT_NAMES, STAGE_LABELS } from "@/lib/agents";
@@ -15,7 +18,7 @@ import { renderDraft } from "@/lib/content-agent/render";
 import type { CustomerInput, OrderInput, ProductInput, RetailerInput } from "@/lib/validate";
 import {
   liveCreateCustomer, liveCreateProduct, liveCreateRetailer, liveImportLog, liveQueueB2bFollowUp, liveQueueB2cFollowUp, liveB2cOpportunities, liveActionLinks, liveUpdateCustomer, liveUpdateRetailer, liveCreateSocialPost, liveCreateTask, liveCustomer, liveCustomers, liveDecideApproval,
-  liveCreateOrder, liveMoveDeal, liveSalesReport, liveOrder, liveOrders, liveProduct, liveProducts, liveSocialPosts, liveSubmitSocialPost, liveUpdateOrderStatus, liveUpdateProduct, liveUpdateSocialPost, liveUpdateTask,
+  liveCreateOrder, liveMoveDeal, liveSalesReport, liveOrder, liveOrders, liveProduct, liveProducts, liveSocialPosts, liveSubmitContentApproval, liveSubmitSocialPost, liveUpdateOrderStatus, liveUpdateProduct, liveDeleteProduct, liveUpdateSocialPost, liveUpdateTask,
 } from "./live";
 import type { WriteOptions } from "./live";
 import { readStore, writableStore, type Store } from "./store";
@@ -23,7 +26,7 @@ import type { Product, Order, OrderStatus,
   Activity, AgentKey, Approval, AuditEntry, Conversation, Customer, DashboardSummary, Deal, PipelineStage,
   ReportSection, Retailer, Task,
 } from "@/types";
-import type { ContentDraft } from "@/types/content-agent";
+import type { ContentDraft, ContentPack, ContentProduct } from "@/types/content-agent";
 import type { SocialPost, SocialPostInput, SocialPostView } from "@/types/social";
 import { addDays, isoDate, renderPostForApproval, sampleMetricsFor, toView } from "@/lib/social/posts";
 
@@ -144,9 +147,11 @@ export async function decideApproval(
   return { ok: true, approval: a };
 }
 
-export async function getContentSamples() {
+/** The records the content agent can draft from. Demo: the built-in SAMPLE records. Live organisation: its own catalogue (no packs yet). */
+export async function getContentSamples(): Promise<{ products: ContentProduct[]; packs: ContentPack[]; note: string }> {
   await tick();
-  return sampleOr({ products: [], packs: [], note: CONTENT_SAMPLE_NOTE }, () => ({ products: contentProducts, packs: contentPacks, note: CONTENT_SAMPLE_NOTE }));
+  if (await isLiveOrg()) return { products: liveContentProducts(await liveProducts()), packs: [], note: LIVE_CONTENT_NOTE };
+  return { products: contentProducts, packs: contentPacks, note: CONTENT_SAMPLE_NOTE };
 }
 
 export type SubmitResult =
@@ -156,27 +161,38 @@ export type SubmitResult =
 /** Regenerates the draft on the server (the browser's copy is never trusted) and queues it as "Pending review".
  *  Nothing is published: the queue entry is a request for a human decision. */
 export async function submitContentDraft(input: ContentRunInput): Promise<SubmitResult> {
-  const run = runContentAgent(input, contentProducts, contentPacks);
+  const { products, packs } = await getContentSamples();
+  // AI-written text sent back by the browser is used only when AI is allowed for this user; it is re-validated and re-guarded on the
+  // server and no model call is made. Otherwise the server regenerates the template draft, as before.
+  const ai = input.aiParts ? await aiPartsAllowed() : { allowed: false, model: "" };
+  const run = ai.allowed ? runContentAgentFromParts(input, products, packs, ai.model) : runContentAgent(input, products, packs);
   if (!run.ok) return { ok: false, reason: "invalid", error: run.error };
   const { draft } = run;
   if (draft.blocked) return { ok: false, reason: "blocked", error: "The draft has blocking issues and cannot be submitted.", draft };
   const preview = renderDraft(draft);
   const title = `${draft.subject.name} · content pack`;
+  const meta = {
+    kind: "content_draft" as const, subject: draft.subject.name, isSample: draft.subject.isSample, allowedClaims: contentClaimsFor(input, products, packs),
+    ...(draft.generator === "openai" && draft.ai ? { aiAssisted: true, aiModel: draft.ai.model, aiPromptVersion: draft.ai.promptVersion } : {}),
+  };
+  if (await isLiveOrg()) {
+    const made = await liveSubmitContentApproval({ title, preview, meta });
+    return made.ok ? { ok: true, approval: made.approval, draft } : { ok: false, reason: "duplicate", error: "An identical draft is already waiting for review.", draft };
+  }
   const store = await writableStore();
   if (store.approvals.some((x) => x.status === "pending" && x.title === title && x.preview === preview))
     return { ok: false, reason: "duplicate", error: "An identical draft is already waiting for review.", draft };
   const approval: Approval = {
     id: `a-${crypto.randomUUID().slice(0, 8)}`, title, type: "Content", generatedBy: "content", created: "just now",
-    status: "pending", preview, tone: "rose",
-    meta: { kind: "content_draft", subject: draft.subject.name, isSample: draft.subject.isSample, allowedClaims: contentClaimsFor(input) },
+    status: "pending", preview, tone: "rose", meta,
   };
   store.approvals.unshift(approval);
   return { ok: true, approval, draft };
 }
 
-function contentClaimsFor(input: ContentRunInput): string[] {
+function contentClaimsFor(input: ContentRunInput, products: ContentProduct[], packs: ContentPack[]): string[] {
   const t = input.target;
-  const rec = t.type === "product" ? contentProducts.find((x) => x.id === t.id) : contentPacks.find((x) => x.id === t.id);
+  const rec = t.type === "product" ? products.find((x) => x.id === t.id) : packs.find((x) => x.id === t.id);
   return rec ? [...rec.approvedClaims] : [];
 }
 
@@ -524,6 +540,11 @@ export async function createProduct(input: ProductInput): Promise<Product | null
 
 export async function updateProduct(id: string, input: ProductInput): Promise<Product | null> {
   return (await isLiveOrg()) ? liveUpdateProduct(id, input) : null;
+}
+
+/** Delete a product (live organisations only). null in demo mode, false when it is not found in this organisation. */
+export async function deleteProduct(id: string): Promise<boolean | null> {
+  return (await isLiveOrg()) ? liveDeleteProduct(id) : null;
 }
 
 /* ---------- Orders. The demo has no sample orders, so it reads empty and cannot write. ---------- */

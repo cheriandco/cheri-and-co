@@ -162,6 +162,13 @@ export function generateContent(subject: ContentSubject, options: GenerateOption
     dataSource: { verified: false, note: "Template-generated from the supplied record only. Nothing is published, sent or stored." },
   };
 
+  return applyGuards(draft, subject);
+}
+
+/** The caption-length check and the claim guard, applied to the whole copy of a draft. Shared by the template generator and the
+ *  AI path, so AI-written text is held to exactly the same rules. Mutates and returns the draft; recomputes `blocked`. */
+export function applyGuards(draft: ContentDraft, subject: Pick<ContentSubject, "approvedClaims">): ContentDraft {
+  const issues = draft.issues;
   if (draft.instagramCaption.length > MAX_CAPTION_LENGTH)
     issues.push({ severity: "error", code: "caption_too_long", message: `Caption is longer than ${MAX_CAPTION_LENGTH} characters.` });
   const seen = new Set<string>();

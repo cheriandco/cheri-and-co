@@ -43,7 +43,9 @@ export default async function ContentPage({ searchParams }: { searchParams: Prom
       {tab === "overview" && (
         <div className="stack">
           <SocialStats posts={social} live={live} />
-          {live ? <Unavailable title="Content pack generator" text="The pack generator works from the built-in sample catalogue, so it is not available for your organisation yet. Write posts in Create Post." /> : (
+          {live ? (samples.products.length === 0
+            ? <Unavailable title="Content pack generator" text="Add products to your catalogue first; the generator drafts from your own products. You can also write posts in Create Post." />
+            : <ContentAgentPanel products={samples.products} packs={samples.packs} note={samples.note} />) : (
             <>
               <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>{SOCIAL_SAMPLE_NOTE}</p>
               <ContentAgentPanel products={samples.products} packs={samples.packs} note={samples.note} />

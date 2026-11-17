@@ -3,6 +3,8 @@ import { getAgents, getCurrentUser } from "@/services";
 import { authRequired } from "@/lib/auth/mode";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { amazonConfigStatus, describeConfigProblem } from "@/lib/amazon/config";
+import { readAiConfig, unavailableReason } from "@/lib/ai/config";
+import { getOpenAiTransport } from "@/lib/ai/transport";
 import { PageHeader, DashboardCard, SectionHeader, StatusBadge } from "@/components/ui";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -22,9 +24,19 @@ function amazonStatus(): string {
   return s.config.environment === "sandbox" ? "Configured for the Amazon SANDBOX (simulated test data). Read-only." : "Configured for Amazon production. Read-only; nothing is changed on Amazon.";
 }
 
+/** AI drafting (OpenAI) status. Names settings only, never values or keys. */
+function aiStatus(): string {
+  const cfg = readAiConfig();
+  const why = unavailableReason(cfg);
+  if (why === "disabled") return "Off — drafts use templates. AI drafting is a Content & Marketing pilot for signed-in live organisations, switched on only by the server setting AI_ENABLED";
+  if (why === "pricing_not_configured") return "Switched on but not usable: the per-token prices are not set, so the spending limit cannot be enforced. Drafts use templates";
+  if (!getOpenAiTransport()) return "Switched on but no API key is configured on the server. Drafts use templates";
+  return `On for the Content & Marketing pilot (live organisations only). Model ${cfg.model}; limits $${cfg.monthlyBudgetUsd}/month and ${cfg.dailyCallsPerOrg} calls/day. Every AI draft needs human approval and nothing is published`;
+}
+
 const integrations = (): string[][] => [
   ["Instagram", "Not connected (demo)", ""], ["Supabase (accounts and database)", supabaseStatus(), ""],
-  ["Amazon Seller data (SP-API, read-only)", amazonStatus(), ""], ["Anthropic Claude (API)", "Not connected — drafts use templates. Needs an Anthropic Console API key; a Claude Team plan alone is not API access", ""],
+  ["Amazon Seller data (SP-API, read-only)", amazonStatus(), ""], ["AI drafting (OpenAI)", aiStatus(), ""],
   ["Canva", "Not connected — design briefs only", ""],
 ];
 

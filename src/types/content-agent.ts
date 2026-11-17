@@ -66,7 +66,7 @@ export interface ContentSubject {
 export type IssueSeverity = "error" | "warning" | "info";
 export type IssueCode =
   | "empty_name" | "missing_category" | "missing_style" | "missing_material" | "no_approved_claims"
-  | "missing_marketplace_link" | "invalid_marketplace_link" | "prohibited_claim" | "sample_data" | "caption_too_long";
+  | "missing_marketplace_link" | "invalid_marketplace_link" | "prohibited_claim" | "sample_data" | "caption_too_long" | "ai_generated";
 
 export interface ContentIssue {
   severity: IssueSeverity;
@@ -93,6 +93,19 @@ export interface MarketplaceCta {
   flipkart: { supplied: boolean; line: string };
 }
 
+/** The only parts of a draft an AI model writes. Links, hashtags, approved claims, the brand line and all structure stay code-built. */
+export interface ContentAiParts {
+  /** Caption body: no links, hashtags or handles. */
+  caption: string;
+  /** On-screen text for reel scenes 1 to 3. */
+  reelOnScreen: string[];
+  /** Text for story frames 1 and 2 (frame 3 is the code-built "Tap to shop"). */
+  storyText: string[];
+  canvaHeadline: string;
+}
+
+export interface ContentAiMeta { model: string; promptVersion: string; redactions: number; parts: ContentAiParts }
+
 /** Pre-submission state of a draft. After submission the Approval record carries the status. */
 export type ContentWorkflowStatus = "ai_generated" | "pending_review" | "approved" | "rejected";
 
@@ -113,6 +126,8 @@ export interface ContentDraft {
   /** Facts the draft is built from, so a reviewer can see what was and was not supplied. */
   factsUsed: string[];
   published: false;
-  generator: "template";
+  generator: "template" | "openai";
+  /** Present only when an AI model wrote the text parts. A person must still approve the draft. */
+  ai?: ContentAiMeta;
   dataSource: { verified: false; note: string };
 }

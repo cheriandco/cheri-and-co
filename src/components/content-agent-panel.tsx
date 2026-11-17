@@ -29,31 +29,35 @@ export function ContentAgentPanel({ products, packs, note }: Props) {
     setState(await requestDraft(values));
   }
 
-  async function submit(v: ContentFormValues) {
+  async function submit(v: ContentFormValues, draft: ContentDraft) {
     setSent("sending");
-    const res = await submitDraft(v);
+    // AI-written text goes back to the server, which re-validates and re-guards it (it is never trusted).
+    const res = await submitDraft({ ...v, aiParts: draft.generator === "openai" ? draft.ai?.parts : undefined });
     if (res.ok) { setSent("sent"); router.refresh(); } else setSent({ error: res.message });
   }
 
   const set = <K extends keyof ContentFormValues>(k: K, v: ContentFormValues[K]) => setValues((x) => ({ ...x, [k]: v }));
+  const sample = products.length === 0 || products.some((p) => p.isSample); // live organisations list their own catalogue
 
   return (
     <DashboardCard>
-      <SectionHeader title="Try the Content & Marketing Agent" extra={<span className="badge champagne plain">Prototype · SAMPLE data</span>} />
+      <SectionHeader title="Try the Content & Marketing Agent" extra={<span className="badge champagne plain">{sample ? "Prototype · SAMPLE data" : "Your catalogue · drafts need approval"}</span>} />
       <p className="muted" style={{ fontSize: 12.5, marginTop: 0 }}>
-        Drafts captions, scripts, stories and Canva briefs from SAMPLE records. {note} Nothing is posted to Instagram, Amazon, Flipkart or anywhere else; approval only records a decision.
+        Drafts captions, scripts, stories and Canva briefs from {sample ? "SAMPLE records" : "your catalogue records"}. {note} Nothing is posted to Instagram, Amazon, Flipkart or anywhere else; approval only records a decision.
       </p>
       <form onSubmit={(e) => { e.preventDefault(); void run(); }} noValidate>
         <div className="field">
           <label htmlFor="ca-target">Product or combo pack</label>
           <select id="ca-target" value={values.target} onChange={(e) => set("target", e.target.value)}>
-            <option value="">Choose a SAMPLE record…</option>
-            <optgroup label="Single pieces (SAMPLE)">
-              {products.map((p) => <option key={p.id} value={`product:${p.id}`}>{p.name} · {p.id}</option>)}
+            <option value="">{sample ? "Choose a SAMPLE record…" : "Choose a product…"}</option>
+            <optgroup label={sample ? "Single pieces (SAMPLE)" : "Products"}>
+              {products.map((p) => <option key={p.id} value={`product:${p.id}`}>{sample ? `${p.name} · ${p.id}` : p.name}</option>)}
             </optgroup>
-            <optgroup label="Combo packs (SAMPLE)">
-              {packs.map((p) => <option key={p.id} value={`pack:${p.id}`}>{p.name} · {p.size}-piece · {p.id}</option>)}
-            </optgroup>
+            {packs.length > 0 && (
+              <optgroup label="Combo packs (SAMPLE)">
+                {packs.map((p) => <option key={p.id} value={`pack:${p.id}`}>{p.name} · {p.size}-piece · {p.id}</option>)}
+              </optgroup>
+            )}
           </select>
         </div>
         <div className="field">
@@ -71,13 +75,13 @@ export function ContentAgentPanel({ products, packs, note }: Props) {
           <input id="ca-flipkart" type="url" inputMode="url" value={values.flipkartUrl} placeholder="https://www.flipkart.com/…" onChange={(e) => set("flipkartUrl", e.target.value)} />
         </div>
         {state.status === "invalid" && <p role="alert" style={{ color: "var(--danger)", fontSize: 12.5 }}>{state.message}</p>}
-        <button type="submit" className="btn primary" disabled={loading}>{loading ? "Drafting…" : "Draft content (simulated)"}</button>
+        <button type="submit" className="btn primary" disabled={loading}>{loading ? "Drafting…" : sample ? "Draft content (simulated)" : "Draft content"}</button>
       </form>
 
       <div aria-live="polite" style={{ marginTop: 18 }}>
-        {loading && <p className="muted" role="status">Drafting from the SAMPLE record…</p>}
+        {loading && <p className="muted" role="status">{sample ? "Drafting from the SAMPLE record…" : "Drafting…"}</p>}
         {state.status === "error" && <ErrorState title="Drafting failed" hint={state.message} onRetry={() => void run()} />}
-        {state.status === "done" && <DraftView draft={state.draft} note={state.note} sent={sent} onSubmit={() => void submit(state.values)} />}
+        {state.status === "done" && <DraftView draft={state.draft} note={state.note} sent={sent} onSubmit={() => void submit(state.values, state.draft)} />}
       </div>
     </DashboardCard>
   );
@@ -94,6 +98,7 @@ function DraftView({ draft: d, note, sent, onSubmit }: { draft: ContentDraft; no
       <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
         <span className="badge info">{WORKFLOW_LABEL[d.status]}</span>
         {d.subject.isSample && <span className="badge champagne">SAMPLE data · not for publishing</span>}
+        {d.generator === "openai" && <span className="badge champagne">AI-written · review every line</span>}
         <span className="badge plain">Not published</span>
         {d.blocked && <span className="badge danger">Blocked</span>}
       </div>

@@ -11,7 +11,7 @@ executed and tested in an in-process Postgres (`tests/rls.test.ts`); the sign-in
   `approvals`, `content_items`, `agent_activity`, `audit_log`.
 - `AUTH_MODE=demo` (default): the public demo, unchanged. No sign-in, sample data only, nothing stored.
 - `AUTH_MODE=required`: every page and API call needs a verified Supabase session and a row in `memberships`.
-- Real (non-demo) organisations read their own rows for tasks, approvals, customers, retailers, leads, products, content posts and orders (see "What is connected" below). B2C Sales and Amazon Intelligence have no data source yet. The built-in sample data is shown only to demo organisations and the public demo.
+- Real (non-demo) organisations read their own rows for tasks, approvals, customers, retailers, leads, products, content posts and orders (see "What is connected" below). B2C Sales has no data source yet; Amazon Intelligence (M5) has code but its tables are only proposed (`docs/M5_SCHEMA_PROPOSAL.md`, not applied). The built-in sample data is shown only to demo organisations and the public demo.
 
 ## Security model
 - Tenancy comes from `public.memberships (org_id, user_id, role)`. Policies compare `org_id` with the caller's own

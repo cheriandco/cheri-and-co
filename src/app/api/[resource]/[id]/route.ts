@@ -19,6 +19,18 @@ export async function GET(_req: Request, ctx: Ctx) {
   return NextResponse.json(row);
 }
 
+/** Only products can be deleted here. Owner and admin only (`products:delete`); the organisation comes from the session. */
+export async function DELETE(req: Request, ctx: Ctx) {
+  const { resource, id } = await ctx.params;
+  if (resource !== "products") return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const denied = await deny("products:delete", req);
+  if (denied) return denied;
+  try {
+    const removed = await s.deleteProduct(id);
+    return removed ? NextResponse.json({ deleted: true }) : NextResponse.json({ error: "Not found" }, { status: 404 });
+  } catch (e) { return errorResponse(e); }
+}
+
 export async function PATCH(req: Request, ctx: Ctx) {
   const { resource, id } = await ctx.params;
   const denied = await deny(resource === "products" ? "products:write" : resource === "orders" ? "orders:write" : "pipeline:write", req);

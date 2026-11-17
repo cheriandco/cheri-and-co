@@ -1,4 +1,4 @@
-import type { Audience, ContentDraft } from "@/types/content-agent";
+import type { Audience, ContentAiParts, ContentDraft } from "@/types/content-agent";
 import { checkMarketplaceLink } from "./links";
 
 export interface ContentFormValues {
@@ -7,6 +7,8 @@ export interface ContentFormValues {
   audience: Audience;
   amazonUrl: string;
   flipkartUrl: string;
+  /** Set only on submit, from an AI draft the user just saw. The server re-validates and re-guards it; it is never trusted. */
+  aiParts?: ContentAiParts;
 }
 
 export type ContentPanelState =
@@ -30,7 +32,7 @@ const body = (v: ContentFormValues) => {
   const [targetType, ...rest] = v.target.split(":");
   return JSON.stringify({
     targetType, targetId: rest.join(":"), audience: v.audience,
-    amazonUrl: v.amazonUrl.trim() || undefined, flipkartUrl: v.flipkartUrl.trim() || undefined,
+    amazonUrl: v.amazonUrl.trim() || undefined, flipkartUrl: v.flipkartUrl.trim() || undefined, aiParts: v.aiParts,
   });
 };
 

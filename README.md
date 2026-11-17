@@ -25,7 +25,7 @@ central CRM/database; the dashboard is the human-approval interface on top.
 Authentication/RBAC and RLS, real Supabase persistence, agent orchestration, realtime, tests.
 Mutations (approvals, tasks, pipeline) currently persist to an in-memory store that resets on server restart.
 
-Business facts and assumptions: `docs/BUSINESS_CONTEXT.md`. Content tooling is **Anthropic Claude + Canva** (no GPT, no Higgsfield).
+Business facts and assumptions: `docs/BUSINESS_CONTEXT.md`. Content tooling is **Canva**; AI drafting uses **OpenAI** (owner decision, see `docs/AI_PROVIDER_OPENAI.md`; built, off by default, never called live; no Higgsfield).
 
 ## Content & Marketing Agent (prototype)
 

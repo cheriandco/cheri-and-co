@@ -6,6 +6,7 @@ import { AuthError, ConflictError } from "@/lib/auth/access";
 import { getAuthUser } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { findProhibitedClaims } from "@/lib/content-agent/claims";
+import { LEDGER_PREFIX } from "@/lib/ai/limits";
 import { renderPostForApproval, toView } from "@/lib/social/posts";
 import { liveFollowUpDraft } from "@/lib/agent-logic";
 import { b2cFollowUpDraft, findOpportunities, type Opportunity } from "@/lib/b2c-opportunities";
@@ -346,6 +347,19 @@ export async function liveUpdateProduct(id: string, input: ProductInput): Promis
   return toProduct(row);
 }
 
+/** Deletes one product of the signed-in organisation. The database's delete policy allows owner and admin only; a refusal
+ *  or a product that is not in this organisation both match no row, so this returns false and nothing else is touched. */
+export async function liveDeleteProduct(id: string): Promise<boolean> {
+  if (!UUID.test(id)) return false;
+  const { supabase, orgId } = await ctx();
+  const { data, error } = await supabase.from("products").delete().eq("org_id", orgId).eq("id", id).select("id, name");
+  if (error) fail(error);
+  const row = ((data ?? []) as { id: string; name: string }[])[0];
+  if (!row) return false;
+  await liveLog({ agent: "content", action: `Deleted product: ${row.name}` });
+  return true;
+}
+
 /* ---------- Content calendar / social posts (content_items) ---------- */
 
 const CONTENT_COLS = "id, platform, title, topic, caption, hashtags, creative_brief, image_direction, scheduled_for, status, approval_id, created_at";
@@ -469,6 +483,40 @@ async function undoSubmit(supabase: Awaited<ReturnType<typeof ctx>>["supabase"],
   try {
     await supabase.rpc("decide_approval", { p_id: approvalId, p_action: "reject", p_note: "Not linked to a post: the submission failed. Please resubmit.", p_title: null, p_preview: null });
   } catch { /* the caller may not be allowed to decide */ }
+}
+
+/* ---------- Content & Marketing Agent drafts -> Approvals, and the AI usage ledger ---------- */
+
+export type LiveContentSubmit = { ok: true; approval: Approval } | { ok: false; reason: "duplicate" };
+
+/** Queues an agent-built content draft as a pending approval. Nothing is published. The caller has already run the claim guard; the
+ *  same guard runs again when a person approves (liveDecideApproval). An identical pending draft is refused. */
+export async function liveSubmitContentApproval(a: { title: string; preview: string; meta: Record<string, unknown> }): Promise<LiveContentSubmit> {
+  const { supabase, orgId } = await ctx();
+  const dup = await supabase.from("approvals").select("id").eq("org_id", orgId).eq("status", "pending").eq("title", a.title).eq("preview", a.preview).limit(1);
+  if (dup.error) fail(dup.error);
+  if (((dup.data ?? []) as unknown[]).length) return { ok: false, reason: "duplicate" };
+  const made = await supabase.from("approvals").insert({
+    org_id: orgId, title: a.title, type: "Content", generated_by: "content", status: "pending", preview: a.preview, meta: a.meta,
+  }).select("id, title, type, generated_by, status, preview, meta, created_at").single();
+  if (made.error || !made.data) fail(made.error ?? { message: "Database request failed" });
+  await liveLog({ agent: "content", action: `Drafted "${a.title}" and sent it for approval (not published)` });
+  return { ok: true, approval: toApproval(made.data as ApprovalRow) };
+}
+
+/** AI usage ledger, kept as prefixed rows in the existing append-only agent_activity table (no migration, no service role). */
+export async function liveAiUsage(sinceIso: string): Promise<{ action: string; at: string }[]> {
+  const { supabase, orgId } = await ctx();
+  const rows = await allRows<{ action: string; created_at: string }>((from, to) => supabase.from("agent_activity").select("action, created_at")
+    .eq("org_id", orgId).like("action", `${LEDGER_PREFIX}%`).gte("created_at", sinceIso).order("created_at").order("id").range(from, to));
+  return rows.map((r) => ({ action: r.action, at: r.created_at }));
+}
+
+/** Unlike liveLog this THROWS on failure: an AI call whose reservation could not be recorded must not go ahead. */
+export async function liveAiRecord(action: string, agent: AgentKey): Promise<void> {
+  const { supabase, orgId, userId } = await ctx();
+  const { error } = await supabase.from("agent_activity").insert({ org_id: orgId, agent, action: action.slice(0, 500), actor_id: userId });
+  if (error) fail(error);
 }
 
 /* ---------- Agent suggestions (B2B follow-up) -> Approvals ---------- */

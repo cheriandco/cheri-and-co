@@ -325,6 +325,8 @@ changed · a secret appears in the browser bundle, repository or logs · the SQL
 
 ---
 
+> **Update (M5, local, uncommitted):** Amazon Intelligence now has a live implementation for Amazon India (read-only SP-API, rules-based insights, existing approval workflow). It is **not deployed and not verified against Amazon**: it needs the Amazon migration approved and applied, an SP-API app with seller self-authorisation, and the live sandbox contract check (`docs/M5_AMAZON_INTELLIGENCE.md`). The inspection below describes the state before M5 and still applies to B2C Sales.
+
 ## 10. Launch blockers: B2C Sales and Amazon Intelligence (inspection, no changes made)
 
 **Provenance caveat.** No signed proposal or scope document exists in the repository or on this machine (searched `D:\` to depth 3 for

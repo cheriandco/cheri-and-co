@@ -35,7 +35,11 @@ See `docs/DATABASE.md` for the legend (confirmed / requested / assumption / open
 | `GET /api/approvals` | All approvals | |
 | `POST /api/approvals/:id/approve` · `/reject` · `/edit` | Decide an approval | Optional `note` (≤500). `edit` requires `title` and/or `preview` (≤6000). Each successful call appends an audit entry. `404` unknown id; `409` already decided; `422` when approving a Content draft that contains prohibited wording. Approving executes, sends and publishes nothing. |
 | `GET /api/agents/status` · `GET /api/agents/activity` | Five agents' status; activity log | |
-| `GET /api/amazon/insights` | Amazon sample tables | Inherited feature; see §4. |
+| `GET /api/amazon/insights` | Demo: Amazon sample tables. Live organisation (M5): stored rules-based insights for the configured Amazon environment | See `docs/M5_AMAZON_INTELLIGENCE.md`. |
+| `GET /api/amazon/connection` · `POST /api/amazon/connection` | Live organisations (M5): connection state (any member) · verify the Amazon India connection (`amazon:sync`, owner/admin) | `404` for demo organisations; `503` when Amazon is not configured or the tables are not installed. Read-only toward Amazon. |
+| `POST /api/amazon/sync` | Live organisations (M5): run ONE bounded sync step `{ kind: orders\|catalog\|inventory\|reports }` (`amazon:sync`, owner/admin) | Answers `{ status: done\|more\|waiting\|failed, counts, retryAfterMs? }`; the browser repeats until done. No background worker. The environment comes from server configuration, never the request. |
+| `POST /api/amazon/insights/generate` | Live organisations (M5): run the deterministic rules over synchronised data (`agents:run`) | No AI and no call to Amazon. |
+| `POST /api/amazon/insights/:id/queue` | Live organisations (M5): send one insight to Approvals (`agents:run`) | `409` for sandbox (simulated) insights, already queued or dismissed; `404` unknown; `422` claim guard. Approving records a decision only. |
 | `GET /api/reports` | Report sections | Mock numbers. |
 | `POST /api/agents/b2c/run` | Run the B2C Sales Agent prototype | Body `{ "enquiry": string }`, 1–1000 chars. Returns a `B2CAgentResult`. **Drafts only: nothing is sent, stored or logged.** `messageSent` is always `false`. |
 | `POST /api/agents/content/run` | Draft content for a SAMPLE product or pack | See §1.4. Returns `{ draft, note? }`. **Nothing is stored, sent or published.** |
@@ -89,7 +93,7 @@ covers the reads; gaps are in §3.
 - No `POST`/`PATCH /api/leads`, no `POST` for customers/retailers/conversations/products.
 - No `GET /api/conversations/:id`; no pagination, sorting or filtering parameters (the brief asked for pagination and server-side filtering).
 - No `GET /api/agents/runs` or action endpoints; no orchestration.
-- No webhook or inbound endpoints (Instagram, Amazon, Flipkart).
+- No webhook or inbound endpoints (Instagram, Amazon, Flipkart). The Amazon integration (M5) is pull-only and read-only: the app calls Amazon's SP-API on an owner/admin's request; nothing is pushed to Amazon and Amazon calls nothing here.
 
 ## 4. Assumptions
 1. Auth will use session-based identity so the actor is derived server-side, never from the request body.

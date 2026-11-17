@@ -416,9 +416,17 @@ describe("no live integrations or publishing in source", () => {
   const files = sourceFiles(join(process.cwd(), "src"));
   const text = (re: RegExp) => files.filter((f) => re.test(readFileSync(f, "utf8"))).map((f) => f.replace(process.cwd(), ""));
 
-  it("has no OpenAI/GPT code or key reference left", () => {
+  // Owner decision (2026-11): OpenAI is the AI provider. It is allowed ONLY in the audited AI files below; the public demo path never uses it.
+  const AI_FILES = /[\\/]src[\\/](lib[\\/]ai[\\/]|lib[\\/]content-agent[\\/](ai|ai-prompt)\.ts|types[\\/]content-agent\.ts|services[\\/](content-ai|ai-ledger|index)\.ts|components[\\/]content-agent-panel\.tsx|app[\\/]\(app\)[\\/]settings[\\/]page\.tsx)/;
+
+  it("mentions OpenAI or the model name only in the audited AI files", () => {
     expect(files.length).toBeGreaterThan(20);
-    expect(text(/openai|gpt-?\d|chatgpt|OPENAI_API_KEY/i)).toEqual([]);
+    expect(text(/openai|gpt-?\d|chatgpt/i).filter((f) => !AI_FILES.test(f))).toEqual([]);
+  });
+
+  it("reads OPENAI_API_KEY and names the provider host in exactly one file", () => {
+    expect(text(/OPENAI_API_KEY/)).toEqual([expect.stringMatching(/src[\\/]lib[\\/]ai[\\/]transport\.ts$/)]);
+    expect(text(/api\.openai\.com/)).toEqual([expect.stringMatching(/src[\\/]lib[\\/]ai[\\/]transport\.ts$/)]);
   });
 
   it("has no Anthropic SDK, endpoint or key read", () => {

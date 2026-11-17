@@ -9,6 +9,8 @@ export const PERMISSIONS = [
   "tasks:write",
   "pipeline:write",
   "products:write",
+  /** Deleting a product. Owner and admin only, matching the database's delete policy (is_admin). */
+  "products:delete",
   "orders:write",
   "agents:run",
   "content:submit",
@@ -25,6 +27,7 @@ const MATRIX: Record<Permission, readonly Role[]> = {
   "tasks:write": WRITERS,
   "pipeline:write": WRITERS,
   "products:write": WRITERS,
+  "products:delete": ["owner", "admin"],
   "orders:write": WRITERS,
   "agents:run": WRITERS,
   "content:submit": WRITERS,
