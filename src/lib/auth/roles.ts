@@ -14,6 +14,8 @@ export const PERMISSIONS = [
   "orders:write",
   "agents:run",
   "content:submit",
+  /** B2C enquiries, drafted replies and their follow-ups. Same writers as the database policies (can_write). */
+  "enquiries:write",
   "approvals:decide",
   /** Amazon Intelligence: connect and run synchronisation. Owner and admin only (it spends Amazon API quota). */
   "amazon:sync",
@@ -31,6 +33,7 @@ const MATRIX: Record<Permission, readonly Role[]> = {
   "orders:write": WRITERS,
   "agents:run": WRITERS,
   "content:submit": WRITERS,
+  "enquiries:write": WRITERS,
   "approvals:decide": ["owner", "admin", "approver"],
   "amazon:sync": ["owner", "admin"],
 };

@@ -44,6 +44,7 @@ beforeAll(async () => {
   await db.exec(stub);
   await db.exec(readFileSync("supabase/migrations/20261101000000_foundation.sql", "utf8"));
   await db.exec(readFileSync("supabase/migrations/20261113000000_product_description_image.sql", "utf8"));
+  await db.exec(readFileSync("supabase/migrations/20261114000000_b2c_enquiries.sql", "utf8"));
   const users = Object.values(U).map((id) => `('${id}', '{}')`).join(",");
   await db.exec(`
     insert into auth.users (id, raw_user_meta_data) values ${users};
@@ -250,6 +251,86 @@ describe("products and content items (real SQL in PGlite, not the hosted project
     await as(U.approverA, () => db.query(`update public.content_items set status = 'approved' where approval_id = '${APP_A}'`));
     expect((await rows(`select status from public.content_items where id = '${CA}'`))[0].status).toBe("approved");
     expect((await rows(`select status from public.approvals where id = '${APP_A}'`))[0].status).toBe("approved");
+  });
+});
+
+describe("B2C enquiries and messages (real SQL in PGlite, not the hosted project)", () => {
+  const PA = "cccccccc-2222-0000-0000-000000000001";
+  const PB = "cccccccc-2222-0000-0000-000000000002";
+  const CUST_A = "dddddddd-2222-0000-0000-000000000001";
+  const CUST_B = "dddddddd-2222-0000-0000-000000000002";
+  const APP_A = "eeeeeeee-2222-0000-0000-000000000001";
+  const APP_B = "eeeeeeee-2222-0000-0000-000000000002";
+  const EA = "ffffffff-2222-0000-0000-000000000001";
+  const EB = "ffffffff-2222-0000-0000-000000000002";
+  const MA = "99999999-2222-0000-0000-000000000001";
+  beforeAll(async () => {
+    await db.exec(`
+      insert into public.products (id, org_id, sku, name) values ('${PA}', '${ORG_A}', 'ENQ-1', 'Enq product A'), ('${PB}', '${ORG_B}', 'ENQ-1', 'Enq product B');
+      insert into public.customers (id, org_id, name) values ('${CUST_A}', '${ORG_A}', 'Enq customer A'), ('${CUST_B}', '${ORG_B}', 'Enq customer B');
+      insert into public.approvals (id, org_id, title, type, generated_by, preview) values
+        ('${APP_A}', '${ORG_A}', 'Reply A', 'B2C Reply', 'b2c', 'text'), ('${APP_B}', '${ORG_B}', 'Reply B', 'B2C Reply', 'b2c', 'text');
+      insert into public.enquiries (id, org_id, subject, source) values ('${EA}', '${ORG_A}', 'A enquiry', 'instagram'), ('${EB}', '${ORG_B}', 'B enquiry', 'email');
+      insert into public.enquiry_messages (id, org_id, enquiry_id, direction, body) values ('${MA}', '${ORG_A}', '${EA}', 'inbound', 'Do you have hoops?');
+    `);
+  });
+  const outbound = (col = "", val = "") => `insert into public.enquiry_messages (org_id, enquiry_id, direction, body, status${col ? `, ${col}` : ""}) values ('${ORG_A}', '${EA}', 'outbound', 'reply', 'draft'${val ? `, ${val}` : ""})`;
+
+  it("signed-out visitors have no access; members read only their own organisation's enquiries and messages", async () => {
+    for (const t of ["enquiries", "enquiry_messages"]) expect(await as(null, () => fails(`select * from public.${t}`)), t).toMatch(/permission denied/);
+    expect((await as(U.staffA, () => rows("select subject from public.enquiries"))).map((r) => r.subject)).toEqual(["A enquiry"]);
+    expect((await as(U.ownerB, () => rows("select subject from public.enquiries"))).map((r) => r.subject)).toEqual(["B enquiry"]);
+    expect((await as(U.viewerA, () => rows("select body from public.enquiry_messages"))).length).toBe(1);
+    expect((await as(U.ownerB, () => rows("select body from public.enquiry_messages"))).length).toBe(0);
+  });
+  it("writers create and edit; a viewer cannot; nobody writes into another organisation", async () => {
+    await as(U.staffA, () => db.query(`insert into public.enquiries (org_id, subject, customer_id, product_id) values ('${ORG_A}', 'Second', '${CUST_A}', '${PA}')`));
+    expect(await as(U.viewerA, () => fails(`insert into public.enquiries (org_id, subject) values ('${ORG_A}', 'x')`))).toMatch(/row-level security/);
+    expect(await as(U.viewerA, () => fails(outbound()))).toMatch(/row-level security/);
+    expect(await as(U.ownerA, () => fails(`insert into public.enquiries (org_id, subject) values ('${ORG_B}', 'x')`))).toMatch(/row-level security/);
+    await as(U.viewerA, () => db.query(`update public.enquiries set status = 'closed' where id = '${EA}'`));
+    await as(U.ownerA, () => db.query(`update public.enquiries set status = 'closed' where id = '${EB}'`));
+    expect((await rows(`select status from public.enquiries where id in ('${EA}', '${EB}') order by id`)).map((r) => r.status)).toEqual(["new", "new"]);
+    expect(await as(U.ownerA, () => fails(`update public.enquiries set org_id = '${ORG_B}' where id = '${EA}'`))).toMatch(/row-level security|cannot be changed/);
+  });
+  it("an enquiry links only to a customer and product of its own organisation", async () => {
+    expect(await as(U.staffA, () => fails(`insert into public.enquiries (org_id, subject, customer_id) values ('${ORG_A}', 'x', '${CUST_B}')`))).toMatch(/foreign key/);
+    expect(await as(U.staffA, () => fails(`insert into public.enquiries (org_id, subject, product_id) values ('${ORG_A}', 'x', '${PB}')`))).toMatch(/foreign key/);
+  });
+  it("a message belongs to an enquiry, product and approval of its own organisation", async () => {
+    expect(await as(U.staffA, () => fails(`insert into public.enquiry_messages (org_id, enquiry_id, direction, body) values ('${ORG_A}', '${EB}', 'inbound', 'x')`))).toMatch(/foreign key/);
+    expect(await as(U.staffA, () => fails(outbound("product_id", `'${PB}'`)))).toMatch(/foreign key/);
+    // a reply is born a draft with no approval (the guard trigger); the composite foreign key to approvals is checked in the catalogue, and its behaviour in tests/b2c-enquiry-db.test.ts
+    expect(await as(U.staffA, () => fails(outbound("approval_id", `'${APP_B}'`)))).toMatch(/must start as a draft/);
+    expect(await as(U.staffA, () => fails(outbound("approval_id", `'${APP_A}'`)))).toMatch(/must start as a draft/);
+    expect((await rows("select 1 from pg_constraint where conrelid = 'public.enquiry_messages'::regclass and contype = 'f' and pg_get_constraintdef(oid) like '%approvals%(org_id, id)%'")).length).toBe(1);
+    await as(U.staffA, () => db.query(outbound()));
+    expect((await rows(`select status from public.enquiry_messages where enquiry_id = '${EA}' and direction = 'outbound'`))[0].status).toBe("draft");
+  });
+  it("the table checks reject bad values: source, status, empty or over-long text, an inbound draft, an outbound 'received', a bad author", async () => {
+    for (const bad of ["source = 'fax'", "status = 'sent'", "subject = ''", `subject = '${"x".repeat(201)}'`]) {
+      expect(await as(U.staffA, () => fails(`update public.enquiries set ${bad} where id = '${EA}'`)), bad.slice(0, 30)).toMatch(/check constraint|cannot be set directly/);
+    }
+    const draft = `enquiry_id = '${EA}' and direction = 'outbound'`;
+    for (const bad of ["body = ''", `body = '${"x".repeat(6001)}'`, "generated_by = 'robot'"]) {
+      expect(await as(U.staffA, () => fails(`update public.enquiry_messages set ${bad} where ${draft}`)), bad.slice(0, 30)).toMatch(/check constraint/);
+    }
+    expect(await as(U.staffA, () => fails(`update public.enquiry_messages set status = 'delivered' where ${draft}`))).toMatch(/cannot move/);
+    expect(await as(U.staffA, () => fails(`update public.enquiry_messages set status = 'draft' where id = '${MA}'`))).toMatch(/customer message cannot be changed/);
+    expect(await as(U.staffA, () => fails(`insert into public.enquiry_messages (org_id, enquiry_id, direction, body, status) values ('${ORG_A}', '${EA}', 'outbound', 'x', 'received')`))).toMatch(/must start as a draft/);
+    expect(await as(U.staffA, () => fails(`insert into public.enquiry_messages (org_id, enquiry_id, direction, body, status) values ('${ORG_A}', '${EA}', 'inbound', 'x', 'draft')`))).toMatch(/check constraint/);
+    await db.query(`update public.enquiry_messages set body = 'x' where ${draft}`); // a long body up to 6000 is fine; the 2000 limit belongs to what the application accepts from a customer message
+    await as(U.staffA, () => db.query(`update public.enquiry_messages set body = '${"x".repeat(6000)}' where ${draft}`));
+  });
+  it("staff cannot delete; nobody can delete a message or an enquiry that has messages (hard deletion is unsupported); deleting a product or customer keeps the enquiry", async () => {
+    await as(U.staffA, () => db.query(`delete from public.enquiries where id = '${EA}'`));
+    expect((await rows(`select 1 from public.enquiries where id = '${EA}'`)).length).toBe(1);
+    await as(U.ownerA, () => db.query(`delete from public.products where id = '${PA}'`));
+    await as(U.ownerA, () => db.query(`delete from public.customers where id = '${CUST_A}'`));
+    expect((await rows("select 1 from public.enquiries where subject = 'Second' and product_id is null and customer_id is null")).length).toBe(1);
+    expect(await as(U.ownerA, () => fails(`delete from public.enquiries where id = '${EA}'`))).toMatch(/cannot be deleted/);
+    expect(await as(U.ownerA, () => fails(`delete from public.enquiry_messages where enquiry_id = '${EA}'`))).toMatch(/cannot be deleted/);
+    expect((await rows(`select 1 from public.enquiry_messages where enquiry_id = '${EA}'`)).length).toBeGreaterThan(0);
   });
 });
 

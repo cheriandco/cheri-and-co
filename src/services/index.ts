@@ -135,7 +135,7 @@ export async function decideApproval(
   const a = store.approvals.find((x) => x.id === id);
   if (!a) return { ok: false, reason: "not_found" };
   if (a.status !== "pending") return { ok: false, reason: "not_pending" };
-  if (action === "approve" && (a.meta?.kind === "content_draft" || a.meta?.kind === "b2b_followup" || a.meta?.kind === "b2c_followup")) {
+  if (action === "approve" && (a.meta?.kind === "content_draft" || a.meta?.kind === "b2b_followup" || a.meta?.kind === "b2c_followup" || a.meta?.kind === "b2c_reply")) {
     const violations = findProhibitedClaims(a.preview, a.meta.allowedClaims);
     if (violations.length) return { ok: false, reason: "prohibited_claims", detail: violations.map((v) => `${v.label}: "${v.match}"`) };
   }

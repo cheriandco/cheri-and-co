@@ -51,7 +51,7 @@ export async function allRows<T>(page: (from: number, to: number) => PageResult,
   }
 }
 
-async function ctx() {
+export async function ctx() {
   const user = await getAuthUser();
   const supabase = await createSupabaseServerClient();
   if (!user?.orgId || !supabase) throw new AuthError(401, "Authentication required");
@@ -59,7 +59,7 @@ async function ctx() {
 }
 
 /** A database error becomes a 403 when Row Level Security or a missing privilege refused it, otherwise a plain error. */
-function fail(error: { code?: string; message: string }): never {
+export function fail(error: { code?: string; message: string }): never {
   if (error.code === "42501" || /row-level security|permission denied|not authorized/i.test(error.message))
     throw new AuthError(403, "You do not have permission to do this");
   // The caller sees a fixed message; the server log keeps the true cause (Postgres code and message: no keys, tokens or row data).
@@ -135,7 +135,7 @@ export async function liveDecideApproval(id: string, action: "approve" | "reject
   if (action === "approve") {
     const { data } = await supabase.from("approvals").select("preview, meta").eq("org_id", orgId).eq("id", id).maybeSingle();
     const row = data as { preview: string; meta: { kind?: string; allowedClaims?: string[] } | null } | null;
-    if (row?.meta?.kind === "content_draft" || row?.meta?.kind === "b2b_followup" || row?.meta?.kind === "b2c_followup" || row?.meta?.kind === "amazon_insight") {
+    if (row?.meta?.kind === "content_draft" || row?.meta?.kind === "b2b_followup" || row?.meta?.kind === "b2c_followup" || row?.meta?.kind === "b2c_reply" || row?.meta?.kind === "amazon_insight") {
       const violations = findProhibitedClaims(row.preview, row.meta.allowedClaims ?? []);
       if (violations.length) return { ok: false, reason: "prohibited_claims", detail: violations.map((v) => `${v.label}: "${v.match}"`) };
     }
@@ -157,6 +157,8 @@ export async function liveDecideApproval(id: string, action: "approve" | "reject
 async function syncContentStatus(supabase: Awaited<ReturnType<typeof ctx>>["supabase"], orgId: string, approvalId: string, status: "approved" | "rejected") {
   try { await supabase.from("content_items").update({ status }).eq("org_id", orgId).eq("approval_id", approvalId); } catch { /* see above */ }
 }
+
+// A B2C reply message and its enquiry follow the decision through the b2c_reply_sync trigger on approvals (migration 20261114): same transaction, no best-effort step here.
 
 export async function liveAudit(): Promise<AuditEntry[]> {
   const { supabase, orgId } = await ctx();

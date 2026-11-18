@@ -1,7 +1,7 @@
 import type { CatalogueProduct, ExtractedPreferences, JewelleryCategory, JewelleryOccasion, JewelleryStyle } from "@/types/b2c-agent";
 import { normalise } from "./intent";
 
-const CATEGORY: [JewelleryCategory, RegExp][] = [
+export const CATEGORY: [JewelleryCategory, RegExp][] = [
   ["set", /\b(sets?|combo)\b/],
   ["earrings", /\b(ear ?rings?|studs?|hoops?|jhumkas?)\b/],
   ["necklace", /\b(necklaces?|pendants?|chains?|chokers?)\b/],
@@ -9,14 +9,14 @@ const CATEGORY: [JewelleryCategory, RegExp][] = [
   ["anklet", /\b(anklets?|payals?)\b/],
   ["ring", /\brings?\b/],
 ];
-const STYLE: [JewelleryStyle, RegExp][] = [
+export const STYLE: [JewelleryStyle, RegExp][] = [
   ["minimal", /\b(minimal\w*|simple|subtle|dainty|understated)\b/],
   ["traditional", /\b(traditional|ethnic|desi)\b/],
   ["statement", /\b(statement|bold|heavy|chunky)\b/],
   ["classic", /\b(classic|elegant|timeless)\b/],
   ["boho", /\b(boho|bohemian|quirky)\b/],
 ];
-const OCCASION: [JewelleryOccasion, RegExp][] = [
+export const OCCASION: [JewelleryOccasion, RegExp][] = [
   ["wedding", /\b(wedding|bridal|bride|shaadi|engagement|reception)\b/],
   ["festive", /\b(festive|festival|diwali|navratri|eid|puja|karwa chauth)\b/],
   ["party", /\b(party|cocktail|night out|club)\b/],

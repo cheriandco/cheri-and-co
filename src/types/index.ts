@@ -162,7 +162,7 @@ export type ApprovalStatus = "pending" | "approved" | "rejected" | "executed";
 
 /** Set on approvals created by the Content & Marketing Agent so the claim guard can re-check them on approval. */
 export interface ContentApprovalMeta {
-  kind: "content_draft" | "b2b_followup" | "b2c_followup" | "amazon_insight";
+  kind: "content_draft" | "b2b_followup" | "b2c_followup" | "b2c_reply" | "amazon_insight";
   subject: string;
   isSample: boolean;
   allowedClaims: string[];
@@ -178,7 +178,7 @@ export interface ContentApprovalMeta {
 export interface Approval {
   id: string;
   title: string;
-  type: "Instagram reply" | "B2C Follow-up" | "B2B outreach" | "Content" | "Amazon listing" | "Pricing change" | "Amazon insight";
+  type: "Instagram reply" | "B2C Reply" | "B2C Follow-up" | "B2B outreach" | "Content" | "Amazon listing" | "Pricing change" | "Amazon insight";
   generatedBy: AgentKey;
   created: string;
   status: ApprovalStatus;
