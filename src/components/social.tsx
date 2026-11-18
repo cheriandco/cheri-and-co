@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { DashboardCard, SectionHeader } from "./ui";
-import { SOCIAL_PLATFORMS, type AssistMode, type AssistResult, type SocialPlatform } from "@/types/social";
+import { CONTENT_PLATFORMS, SOCIAL_PLATFORMS, type AssistMode, type AssistResult, type ContentPlatform, type SocialPlatform } from "@/types/social";
 
-type Values = { title: string; topic: string; platform: SocialPlatform; caption: string; hashtags: string; creativeBrief: string; imageDirection: string; scheduledFor: string };
+type Values = { title: string; topic: string; platform: ContentPlatform; caption: string; hashtags: string; creativeBrief: string; imageDirection: string; scheduledFor: string };
 const EMPTY: Values = { title: "", topic: "", platform: "Instagram", caption: "", hashtags: "#CheriAndCo", creativeBrief: "", imageDirection: "", scheduledFor: "" };
 
 type Notice = { kind: "ok" | "error"; text: string; issues?: string[] } | null;
@@ -35,7 +35,7 @@ export function PostComposer({ initial, postId, live = false }: { initial?: Part
 
   async function runAssist(mode: AssistMode) {
     setBusy(`assist-${mode}`); setNotice(null);
-    const res = await call<AssistResult>("/api/social/assist", { mode, platform: v.platform, topic: v.topic || v.title, caption: v.caption });
+    const res = await call<AssistResult>("/api/social/assist", { mode, platform: ((SOCIAL_PLATFORMS as readonly string[]).includes(v.platform) ? v.platform : "Instagram") as SocialPlatform, topic: v.topic || v.title, caption: v.caption });
     setBusy(null);
     if (res.ok) setAssist(res.data); else setNotice({ kind: "error", text: res.error });
   }
@@ -80,7 +80,7 @@ export function PostComposer({ initial, postId, live = false }: { initial?: Part
             <input id="sp-topic" value={v.topic} maxLength={200} onChange={(e) => set("topic", e.target.value)} placeholder="What is this post about?" /></div>
           <div className="field"><label htmlFor="sp-platform">Platform</label>
             <select id="sp-platform" value={v.platform} onChange={(e) => set("platform", e.target.value as SocialPlatform)}>
-              {SOCIAL_PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
+              {CONTENT_PLATFORMS.map((p) => <option key={p} value={p}>{p === "Email" ? "Email (campaign copy)" : p === "Amazon A+" ? "Amazon A+ (product description)" : p}</option>)}
             </select></div>
           <div className="field"><label htmlFor="sp-date">Planned date</label>
             <input id="sp-date" type="date" value={v.scheduledFor} onChange={(e) => set("scheduledFor", e.target.value)} /></div>

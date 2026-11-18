@@ -1,12 +1,12 @@
 /** Pure helpers for the social media demo: input validation, approval text, status, calendar and sample metrics.
  *  No I/O. Nothing here posts, sends or stores anything. */
 import { str } from "@/lib/validate";
-import { SOCIAL_PLATFORMS, type SocialMetrics, type SocialPlatform, type SocialPost, type SocialPostInput, type SocialPostView, type SocialStatus } from "@/types/social";
+import { CONTENT_PLATFORMS, type ContentPlatform, type SocialMetrics, type SocialPost, type SocialPostInput, type SocialPostView, type SocialStatus } from "@/types/social";
 import type { ApprovalStatus } from "@/types";
 
 export const LIMITS = { title: 120, topic: 200, caption: 2200, brief: 1500, image: 800, tags: 30, tag: 40 } as const;
 
-export const isPlatform = (v: unknown): v is SocialPlatform => typeof v === "string" && (SOCIAL_PLATFORMS as readonly string[]).includes(v);
+export const isPlatform = (v: unknown): v is ContentPlatform => typeof v === "string" && (CONTENT_PLATFORMS as readonly string[]).includes(v);
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 export const isIsoDate = (v: unknown): v is string => typeof v === "string" && DATE.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().startsWith(v);
@@ -34,7 +34,7 @@ export function parsePostInput(body: Record<string, unknown> | null): ParsedPost
   if (!body) return { ok: false, error: "Invalid request." };
   const title = str(body.title, LIMITS.title);
   if (!title) return { ok: false, error: `Give the post a title (1 to ${LIMITS.title} characters).` };
-  if (!isPlatform(body.platform)) return { ok: false, error: "Choose Instagram, Facebook or LinkedIn." };
+  if (!isPlatform(body.platform)) return { ok: false, error: "Choose Instagram, Facebook, LinkedIn, Email or Amazon A+." };
   const topic = optional(body.topic, LIMITS.topic);
   const caption = optional(body.caption, LIMITS.caption);
   const creativeBrief = optional(body.creativeBrief, LIMITS.brief);
@@ -53,13 +53,14 @@ export function parsePostInput(body: Record<string, unknown> | null): ParsedPost
 }
 
 /** The text a reviewer sees in the approval queue (and that the claim guard scans). */
-export function renderPostForApproval(p: Pick<SocialPost, "platform" | "caption" | "hashtags" | "creativeBrief" | "imageDirection">): string {
+export function renderPostForApproval(p: Pick<SocialPost, "platform" | "caption" | "hashtags" | "creativeBrief" | "imageDirection"> & { topic?: string }): string {
   return [
     `Platform: ${p.platform} (simulated, not posted)`,
     `Caption: ${p.caption || "[no caption yet]"}`,
     `Hashtags: ${p.hashtags.length ? p.hashtags.join(" ") : "[none]"}`,
     `Creative brief: ${p.creativeBrief || "[none]"}`,
     `Image direction: ${p.imageDirection || "[none]"}`,
+    ...(p.topic && /^(AI|Template) draft/.test(p.topic) ? [`Source: ${p.topic}`] : []), // Content Studio drafts say how they were made
   ].join("\n");
 }
 

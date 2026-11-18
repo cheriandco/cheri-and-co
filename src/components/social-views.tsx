@@ -5,7 +5,7 @@ import { STATUS_LABEL, buildCalendar, summarize } from "@/lib/social/posts";
 import type { SocialPostView, SocialStatus } from "@/types/social";
 
 const TONE: Record<SocialStatus, string> = { draft: "", pending_approval: "champagne", approved: "sage", rejected: "danger", simulated_published: "info" };
-const PLATFORM_SHORT = { Instagram: "IG", Facebook: "FB", LinkedIn: "in" } as const;
+const PLATFORM_SHORT = { Instagram: "IG", Facebook: "FB", LinkedIn: "in", Email: "@", "Amazon A+": "A+" } as const;
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export const formatDay = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });

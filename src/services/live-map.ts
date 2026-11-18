@@ -4,7 +4,7 @@ import { temperatureFor } from "@/lib/agent-logic";
 import { ORDER_CHANNELS, ORDER_STATUSES } from "@/types";
 import type { ReportSection } from "@/types";
 import type { Activity, AgentKey, Approval, AuditEntry, Customer, Deal, Order, PipelineStage, Priority, Product, Retailer, Task, Temperature } from "@/types";
-import type { SocialPlatform, SocialPost, SocialStatus } from "@/types/social";
+import { CONTENT_PLATFORMS, type ContentPlatform, type SocialPost, type SocialStatus } from "@/types/social";
 
 export interface TaskRow { id: string; title: string; source: string; due_at: string | null; priority: string; status: string; assignee_id: string | null; related_ref: string | null }
 export interface ApprovalRow { id: string; title: string; type: string; generated_by: string; status: string; preview: string; meta: unknown; created_at: string }
@@ -140,7 +140,7 @@ export function toProduct(r: ProductRow): Product {
 }
 
 /** Only these three platforms have a social composer; the other platforms the table allows (Pinterest, Email, Amazon A+) are not shown as posts. */
-export const SOCIAL_DB_PLATFORMS: readonly SocialPlatform[] = ["Instagram", "Facebook", "LinkedIn"];
+export const SOCIAL_DB_PLATFORMS: readonly ContentPlatform[] = CONTENT_PLATFORMS;
 
 /** The database status is only a fallback: when the post has an approval, its status follows that approval (see deriveStatus).
  *  The app never publishes; a row marked "published" counts as approved only if an approval for it says so (otherwise it is a draft). */
@@ -148,7 +148,7 @@ const SOCIAL_STATUS: Record<string, SocialStatus> = { draft: "draft", pending_ap
 
 export function toSocialPost(r: ContentRow): SocialPost {
   return {
-    id: r.id, title: r.title, topic: r.topic ?? "", platform: r.platform as SocialPlatform, caption: r.caption ?? "", hashtags: r.hashtags ?? [],
+    id: r.id, title: r.title, topic: r.topic ?? "", platform: r.platform as ContentPlatform, caption: r.caption ?? "", hashtags: r.hashtags ?? [],
     creativeBrief: r.creative_brief ?? "", imageDirection: r.image_direction ?? "",
     scheduledFor: r.scheduled_for ?? r.created_at.slice(0, 10), // an undated legacy row is placed on the day it was created
     approvalId: r.approval_id ?? undefined, isSample: false, tone: "rose",

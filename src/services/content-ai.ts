@@ -8,6 +8,7 @@ import { CallRateLimiter } from "@/lib/ai/limits";
 import { getOpenAiTransport, type OpenAiTransport } from "@/lib/ai/transport";
 import { runContentAgent, type RunResult, type ContentRunInput } from "@/lib/content-agent";
 import { runContentAgentAi } from "@/lib/content-agent/ai";
+import type { StudioDeps } from "@/lib/content-studio/generate";
 import type { ContentPack, ContentProduct } from "@/types/content-agent";
 import { liveAiLedger } from "./ai-ledger";
 
@@ -21,6 +22,17 @@ function sharedLimiter(limit: number): CallRateLimiter {
 /** Test seam: lets a test supply a fake transport. Production never sets it. */
 let transportOverride: OpenAiTransport | null | undefined;
 export const __setAiTransportForTests = (t: OpenAiTransport | null | undefined) => { transportOverride = t; };
+
+/** The Content Studio's AI dependencies, or null when AI may not run for this request (not a live organisation, AI off, or prices missing).
+ *  Same gates as runContentDraft. A null transport means no API key: the generator then uses its template. */
+export async function aiRuntime(): Promise<StudioDeps | null> {
+  const user = await getAuthUser();
+  if (!isLive(user) || !user) return null;
+  const config = readAiConfig();
+  if (unavailableReason(config) !== null) return null;
+  const transport = transportOverride !== undefined ? transportOverride : getOpenAiTransport();
+  return { config, transport, ledger: liveAiLedger, limiter: sharedLimiter(config.perUserPerMinute), userKey: user.id };
+}
 
 export async function runContentDraft(input: ContentRunInput, products: ContentProduct[], packs: ContentPack[]): Promise<RunResult> {
   const user = await getAuthUser();

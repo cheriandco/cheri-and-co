@@ -419,13 +419,18 @@ const contentColumns = (input: SocialPostInput) => ({
 });
 
 /** A new post is always a draft. The planned date defaults to a week from today, like the demo. */
-export async function liveCreateSocialPost(input: SocialPostInput, defaultDate: string): Promise<SocialPost> {
+export async function liveCreateSocialPost(input: SocialPostInput, defaultDate: string, logAs?: string): Promise<SocialPost> {
   const { supabase, orgId } = await ctx();
   const { data, error } = await supabase.from("content_items")
     .insert({ org_id: orgId, ...contentColumns(input), scheduled_for: input.scheduledFor ?? defaultDate, status: "draft" }).select(CONTENT_COLS).single();
   if (error) fail(error);
-  await liveLog({ agent: "content", action: `Drafted post: ${input.title}` });
+  await liveLog({ agent: "content", action: logAs ?? `Drafted post: ${input.title}` });
   return toSocialPost(data as ContentRow);
+}
+
+/** One post of this organisation (any kind the Content module stores), with its approval-backed status. Null when it is not this organisation's. */
+export async function liveSocialPost(id: string): Promise<SocialPostView | null> {
+  return (await loadPost(id)).view;
 }
 
 export type LivePostResult =
@@ -433,7 +438,7 @@ export type LivePostResult =
   | { ok: false; reason: "not_found" | "invalid_state" | "prohibited_claims"; error: string; detail?: string[] };
 
 /** Only drafts and rejected posts can be edited. Editing makes it a fresh draft with no approval attached. */
-export async function liveUpdateSocialPost(id: string, input: SocialPostInput): Promise<LivePostResult> {
+export async function liveUpdateSocialPost(id: string, input: SocialPostInput, logAs?: string): Promise<LivePostResult> {
   const { supabase, orgId, row, view } = await loadPost(id);
   if (!row || !view) return { ok: false, reason: "not_found", error: "Post not found." };
   if (view.status !== "draft" && view.status !== "rejected") return { ok: false, reason: "invalid_state", error: "Only drafts and rejected posts can be edited." };
@@ -442,6 +447,7 @@ export async function liveUpdateSocialPost(id: string, input: SocialPostInput): 
   if (error) fail(error);
   const saved = ((data ?? []) as ContentRow[])[0];
   if (!saved) return { ok: false, reason: "not_found", error: "Post not found." };
+  await liveLog({ agent: "content", action: logAs ?? `Edited draft: ${input.title}` });
   return { ok: true, post: viewFor(saved, new Map()) };
 }
 

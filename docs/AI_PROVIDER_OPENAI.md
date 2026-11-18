@@ -39,3 +39,15 @@
 3. Prices entered for the chosen model; `AI_ENABLED=true` set only in the **authenticated app** environment, never the public demo project.
 4. Signed-in live organisation with one real product; run one draft; check the ledger row, the draft, and that submit still needs approval.
 5. Turn `AI_ENABLED` back off if anything looks wrong.
+
+## Content Studio (Milestone 2) — Content & Marketing, live organisations only
+Status: built locally and tested with a fake transport only. **No live OpenAI call has been made.** Still off unless `AI_ENABLED=true`; with it off the Studio makes template drafts.
+
+Flow (`/content?tab=studio`): choose a catalogue product → choose Instagram caption, Facebook post, LinkedIn post, product description or campaign copy → generate → the draft is **saved immediately** as a draft → edit, save, regenerate (replaces the text) → submit for approval → a person decides in Approvals. Nothing is published or sent.
+
+- **Context sent to the model:** the Brand Brain (`src/lib/content-studio/brand-brain.ts`: owner-confirmed facts, plus an *assumed* voice marked as style guidance only), the product's name, category and owner-written description, the audience and an optional campaign note, all passed through the redactor. **Not sent:** customer records, the image link, ids, prices, stock, marketplace links. The image link is kept in the draft's image direction as a reference for a person; the model never sees it.
+- **Claims:** no approved claims exist in the database for live products, so the claim guard allows none. AI text containing a price, offer, stock, material, certification, superlative or health wording is **discarded** and a template is used instead. The description is not treated as approved claims.
+- **Storage (no migration):** drafts go to `content_items`. Instagram, Facebook and LinkedIn use their own platform; **product descriptions use `Amazon A+` and campaign copy uses `Email`**, the existing allowed values nearest to them. A migration widening `content_items.platform` is needed to store them under their own names.
+- **Activity history** (`agent_activity`): the AI ledger row, "Generated … / Regenerated …" (with model and prompt version), "Edited draft", "Sent … for approval", "Approved/Rejected". Approval and rejection also update the content item. The approval preview carries a "Source: AI draft …" line.
+- **Limits:** the same spend ledger, per-day cap and per-minute limiter as the pilot apply; every attempt counts, including failures; a regenerate is refused (no call) once the draft is submitted.
+- **Not done:** an editable, stored Brand Brain (needs a table); approved product claims; AI use of the marketplace Content Pack panel's pack records (the original Instagram pack generator still uses name and category only).

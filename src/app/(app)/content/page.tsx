@@ -6,6 +6,9 @@ import { SOCIAL_SAMPLE_NOTE } from "@/mocks/social-samples";
 import { PostComposer } from "@/components/social";
 import { CalendarGrid, MetricsTable, PlatformSummary, PostList, SocialStats } from "@/components/social-views";
 import { ContentAgentPanel } from "@/components/content-agent-panel";
+import { ContentStudio } from "@/components/content-studio";
+import { BRAND_FACTS, BRAND_NEVER } from "@/lib/content-studio/brand-brain";
+import { aiPartsAllowed } from "@/services/content-ai";
 import { PageHeader, Tabs, DashboardCard, DataTable, SectionHeader, StatusBadge, Thumb, Money, EmptyState } from "@/components/ui";
 import { ContentList } from "@/components/domain";
 import { ApprovalQueue } from "@/components/interactive";
@@ -16,8 +19,11 @@ const TABS = [
   ["overview", "Overview"], ["calendar", "Content Calendar"], ["create", "Create Post"], ["products", "Product Library"], ["brand", "Brand Brain"],
   ["assets", "Creative Assets"], ["approvals", "Approvals"], ["published", "Published"], ["performance", "Performance"],
 ].map(([id, label]) => ({ id, label }));
+/** A live organisation also gets the AI Studio, right after Create Post. */
+const LIVE_TABS = TABS.flatMap((t) => (t.id === "create" ? [t, { id: "studio", label: "AI Studio" }] : [t]));
 
 const WORKFLOW = ["Product Library", "Brand Brain", "Content Strategy", "Content Calendar", "Claude Creative Brain (planned)", "Creative Generation", "Canva Design (brief only)", "Human Approval", "Manual Publish (not automated)", "Performance"];
+const LIVE_WORKFLOW = ["Product Library", "Brand Brain", "AI Studio (AI off by default)", "Edit and regenerate", "Human Approval", "Manual Publish (not automated)"];
 
 export default async function ContentPage({ searchParams }: { searchParams: Promise<{ tab?: string; edit?: string }> }) {
   const live = await isLiveOrg();
@@ -33,7 +39,7 @@ export default async function ContentPage({ searchParams }: { searchParams: Prom
   return (
     <div className="stack">
       <PageHeader eyebrow="Content & Marketing Agent" title="Content & marketing" subtitle="From product to approval-ready content — no prompts to write. Your agent plans, drafts and waits for your approval." />
-      <Tabs base="/content" tabs={TABS} active={tab} />
+      <Tabs base="/content" tabs={live ? LIVE_TABS : TABS} active={tab} />
       <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
         {live
           ? "Posts, products and approvals here are your organisation's own records. This system does not publish anything: publish approved posts by hand."
@@ -54,10 +60,10 @@ export default async function ContentPage({ searchParams }: { searchParams: Prom
           <DashboardCard>
             <SectionHeader title="How content gets made" />
             <ol className="flow" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-              {WORKFLOW.map((w, i) => (
+              {(live ? LIVE_WORKFLOW : WORKFLOW).map((w, i, all) => (
                 <li key={w} className="row" style={{ gap: 8 }}>
                   <span className={w === "Human Approval" ? "on" : ""}>{w}</span>
-                  {i < WORKFLOW.length - 1 && <ChevronRight size={14} />}
+                  {i < all.length - 1 && <ChevronRight size={14} />}
                 </li>
               ))}
             </ol>
@@ -92,6 +98,12 @@ export default async function ContentPage({ searchParams }: { searchParams: Prom
         }} />
       )}
 
+      {tab === "studio" && live && (
+        products.filter((p) => p.status !== "archived").length === 0
+          ? <Unavailable title="AI Studio" text="Add products to your catalogue first; the Studio drafts from your own products." />
+          : <ContentStudio aiOn={(await aiPartsAllowed()).allowed} products={products.filter((p) => p.status !== "archived").map((p) => ({ id: p.id, name: p.name, category: p.category, description: p.description ?? null, imageUrl: p.imageUrl ?? null }))} />
+      )}
+
       {tab === "products" && (
         <DashboardCard flush>
           <DataTable rows={products} columns={[
@@ -103,7 +115,7 @@ export default async function ContentPage({ searchParams }: { searchParams: Prom
         </DashboardCard>
       )}
 
-      {tab === "brand" && live && <Unavailable title="Brand Brain" text="Brand rules are not stored in the database yet." />}
+      {tab === "brand" && live && <BrandBrainView />}
       {tab === "brand" && !live && (
         <div className="grid even">
           {rules.map((r) => <DashboardCard key={r.id} tint><div className="eyebrow">{r.title}</div><p className="serif" style={{ fontSize: 22 }}>{r.detail}</p></DashboardCard>)}
@@ -142,6 +154,25 @@ export default async function ContentPage({ searchParams }: { searchParams: Prom
           </DashboardCard>
         </div>
       )}
+    </div>
+  );
+}
+
+/** The approved brand information the AI Studio is allowed to use. Read-only: it is code, not a database table. */
+function BrandBrainView() {
+  return (
+    <div className="stack">
+      <DashboardCard>
+        <SectionHeader title="Brand Brain" extra={<span className="badge champagne plain">Read-only · used by the AI Studio</span>} />
+        <p className="muted" style={{ fontSize: 12.5, marginTop: 0 }}>Only owner-confirmed facts are treated as facts. The voice is an assumption until brand guidelines are supplied. Nothing else about the brand is invented.</p>
+        <dl className="kv" style={{ fontSize: 13.5 }}>
+          {BRAND_FACTS.map((f) => (<div key={f.id} style={{ display: "contents" }}><dt>{f.label}</dt><dd>{f.text} <span className={`badge ${f.status === "confirmed" ? "sage" : "champagne"} plain`}>{f.status === "confirmed" ? "Confirmed" : "Assumed"}</span>{!f.inCopy && <span className="muted"> · not sent to the AI</span>}</dd></div>))}
+        </dl>
+      </DashboardCard>
+      <DashboardCard>
+        <SectionHeader title="Never written" />
+        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13.5 }}>{BRAND_NEVER.map((n) => <li key={n}>{n}</li>)}</ul>
+      </DashboardCard>
     </div>
   );
 }

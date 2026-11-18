@@ -3,7 +3,7 @@
 import { findProhibitedClaims } from "@/lib/content-agent/claims";
 import { str } from "@/lib/validate";
 import { LIMITS, isPlatform, normalizeHashtags } from "./posts";
-import type { AssistMode, AssistResult, SocialPlatform } from "@/types/social";
+import { SOCIAL_PLATFORMS, type AssistMode, type AssistResult, type SocialPlatform } from "@/types/social";
 
 export const ASSIST_LABEL = "DEMO RESPONSE · template-based. No AI model is connected.";
 const MODES: AssistMode[] = ["ideas", "caption", "brief"];
@@ -58,13 +58,13 @@ export type AssistParsed = { ok: true; mode: AssistMode; platform: SocialPlatfor
 export function parseAssistInput(body: Record<string, unknown> | null): AssistParsed {
   if (!body) return { ok: false, error: "Invalid request." };
   if (!MODES.includes(body.mode as AssistMode)) return { ok: false, error: "Choose ideas, caption or brief." };
-  if (!isPlatform(body.platform)) return { ok: false, error: "Choose Instagram, Facebook or LinkedIn." };
+  if (!isPlatform(body.platform) || !(SOCIAL_PLATFORMS as readonly string[]).includes(body.platform)) return { ok: false, error: "Choose Instagram, Facebook or LinkedIn." };
   const topic = body.topic === undefined || body.topic === "" ? "" : str(body.topic, LIMITS.topic);
   const cap = body.caption === undefined || body.caption === "" ? "" : str(body.caption, LIMITS.caption);
   if (topic === null) return { ok: false, error: `Topic is too long (max ${LIMITS.topic}).` };
   if (cap === null) return { ok: false, error: `Caption is too long (max ${LIMITS.caption}).` };
   if (!topic && !cap) return { ok: false, error: "Add a topic or a caption first, so the demo has something to work from." };
-  return { ok: true, mode: body.mode as AssistMode, platform: body.platform, topic, caption: cap };
+  return { ok: true, mode: body.mode as AssistMode, platform: body.platform as SocialPlatform, topic, caption: cap };
 }
 
 export function runAssist(input: { mode: AssistMode; platform: SocialPlatform; topic: string; caption: string }): AssistResult {

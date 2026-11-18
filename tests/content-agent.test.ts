@@ -417,7 +417,7 @@ describe("no live integrations or publishing in source", () => {
   const text = (re: RegExp) => files.filter((f) => re.test(readFileSync(f, "utf8"))).map((f) => f.replace(process.cwd(), ""));
 
   // Owner decision (2026-11): OpenAI is the AI provider. It is allowed ONLY in the audited AI files below; the public demo path never uses it.
-  const AI_FILES = /[\\/]src[\\/](lib[\\/]ai[\\/]|lib[\\/]content-agent[\\/](ai|ai-prompt)\.ts|types[\\/]content-agent\.ts|services[\\/](content-ai|ai-ledger|index)\.ts|components[\\/]content-agent-panel\.tsx|app[\\/]\(app\)[\\/]settings[\\/]page\.tsx)/;
+  const AI_FILES = /[\\/]src[\\/](lib[\\/]ai[\\/]|lib[\\/]content-agent[\\/](ai|ai-prompt)\.ts|lib[\\/]content-studio[\\/]|types[\\/]content-agent\.ts|services[\\/](content-ai|content-studio|ai-ledger|index)\.ts|components[\\/](content-agent-panel|content-studio)\.tsx|app[\\/]\(app\)[\\/]settings[\\/]page\.tsx)/;
 
   it("mentions OpenAI or the model name only in the audited AI files", () => {
     expect(files.length).toBeGreaterThan(20);

@@ -4,6 +4,11 @@ import type { ThumbTone } from "./index";
 export const SOCIAL_PLATFORMS = ["Instagram", "Facebook", "LinkedIn"] as const;
 export type SocialPlatform = (typeof SOCIAL_PLATFORMS)[number];
 
+/** Where a saved draft is meant to be used. The first three are social platforms; the other two reuse existing allowed values of
+ *  content_items.platform for product-description and campaign-copy drafts (no migration). Nothing is ever posted to any of them. */
+export const CONTENT_PLATFORMS = ["Instagram", "Facebook", "LinkedIn", "Email", "Amazon A+"] as const;
+export type ContentPlatform = (typeof CONTENT_PLATFORMS)[number];
+
 export type SocialStatus = "draft" | "pending_approval" | "approved" | "rejected" | "simulated_published";
 
 /** SAMPLE numbers. They describe no real post and no real audience. */
@@ -21,7 +26,7 @@ export interface SocialPost {
   id: string;
   title: string;
   topic: string;
-  platform: SocialPlatform;
+  platform: ContentPlatform;
   caption: string;
   hashtags: string[];
   creativeBrief: string;
@@ -49,7 +54,7 @@ export interface SocialPostView extends SocialPost {
 export interface SocialPostInput {
   title: string;
   topic: string;
-  platform: SocialPlatform;
+  platform: ContentPlatform;
   caption: string;
   hashtags: string[];
   creativeBrief: string;

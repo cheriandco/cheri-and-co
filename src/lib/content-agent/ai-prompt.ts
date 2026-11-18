@@ -66,7 +66,7 @@ const CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F]/;
 const inRange = (s: string, [min, max]: readonly [number, number]) => s.trim().length >= min && s.length <= max;
 
 /** Text rules shared by every AI-written field. Rejects links, hashtags, handles, personal data and markup. */
-function cleanText(s: unknown, range: readonly [number, number], allowNewlines = false): string | null {
+export function cleanText(s: unknown, range: readonly [number, number], allowNewlines = false): string | null {
   if (typeof s !== "string") return null;
   const t = allowNewlines ? s.replace(/\r\n?/g, "\n").trim() : s.trim();
   if (!inRange(t, range)) return null;
