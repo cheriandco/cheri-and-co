@@ -123,7 +123,7 @@ export function toDeal(l: LeadRow, r: RetailerRow, names: Map<string, string>, n
 
 /* ---------- Products and content ---------- */
 
-export interface ProductRow { id: string; sku: string; name: string; category: string | null; price: number | string | null; stock: number | null; status: string; channels: string[] | null; created_at: string }
+export interface ProductRow { id: string; sku: string; name: string; category: string | null; price: number | string | null; stock: number | null; status: string; channels: string[] | null; description: string | null; image_url: string | null; created_at: string }
 export interface ContentRow {
   id: string; platform: string; title: string; topic: string | null; caption: string | null; hashtags: string[] | null; creative_brief: string | null;
   image_direction: string | null; scheduled_for: string | null; status: string; approval_id: string | null; created_at: string;
@@ -135,6 +135,7 @@ export function toProduct(r: ProductRow): Product {
   return {
     id: r.id, sku: r.sku, name: r.name, category: r.category ?? "", price: r.price === null ? null : Number(r.price), stock: r.stock,
     channels: r.channels ?? [], status: PRODUCT_STATUS.includes(r.status) ? (r.status as Product["status"]) : "draft",
+    description: r.description ?? null, imageUrl: r.image_url ?? null,
   };
 }
 

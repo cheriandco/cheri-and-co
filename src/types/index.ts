@@ -130,6 +130,10 @@ export interface Product {
   stock: number | null;
   channels: string[];
   status: "active" | "draft" | "low_stock" | "archived";
+  /** Optional free text (live catalogue only; the sample catalogue has none). */
+  description?: string | null;
+  /** Optional https link to a picture (live catalogue only). A link, not an uploaded file. */
+  imageUrl?: string | null;
 }
 
 export type ContentStatus =

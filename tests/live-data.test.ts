@@ -384,7 +384,7 @@ const deleteProduct = (id: string, resource = "products") => deleteResource(jreq
 const postAction = (id: string, action: string, body?: unknown) => postSocialAction(jreq("POST", `https://app.test/api/social/posts/${id}/${action}`, body), { params: Promise.resolve({ id, action }) });
 const setRole = (role: string) => { h.tables.memberships = [{ user_id: "u1", org_id: ORG, role, organizations: { is_demo: false } }]; };
 
-const productRow = (over: Row) => ({ id: P1, org_id: ORG, sku: "CC-001", name: "Mini hoop", category: "Earrings", price: "1499.00", stock: 12, status: "active", channels: ["Website"], created_at: stamp, ...over });
+const productRow = (over: Row) => ({ id: P1, org_id: ORG, sku: "CC-001", name: "Mini hoop", category: "Earrings", price: "1499.00", stock: 12, status: "active", channels: ["Website"], description: null, image_url: null, created_at: stamp, ...over });
 const contentRow = (over: Row) => ({
   id: POST1, org_id: ORG, platform: "Instagram", title: "Everyday stack", topic: "Layering", caption: "A calm everyday stack.", hashtags: ["#CheriAndCo"],
   creative_brief: "Soft light", image_direction: "Flat lay", scheduled_for: "2026-11-10", status: "draft", approval_id: null, created_at: stamp, ...over,
@@ -428,7 +428,7 @@ describe("slice 3: live products", () => {
     const res = await postProduct({ sku: "CC-002", name: "Pearl drop", price: "2499.5", stock: "4", status: "active", channels: "Website, Amazon", org_id: "attacker-org", reach: 99 });
     expect(res.status).toBe(201);
     const ins = h.calls.find((c) => c.table === "products" && c.op === "insert")!;
-    expect(ins.payload).toEqual({ org_id: ORG, sku: "CC-002", name: "Pearl drop", category: null, price: 2499.5, stock: 4, status: "active", channels: ["Website", "Amazon"] });
+    expect(ins.payload).toEqual({ org_id: ORG, sku: "CC-002", name: "Pearl drop", category: null, price: 2499.5, stock: 4, status: "active", channels: ["Website", "Amazon"], description: null, image_url: null });
   });
   it("rejects invalid products with 400 and writes nothing", async () => {
     h.calls.length = 0;
@@ -451,6 +451,28 @@ describe("slice 3: live products", () => {
     expect(upd.payload).not.toHaveProperty("org_id");
     expect((await patchProduct(P_OTHER, { sku: "X", name: "Hijack" })).status).toBe(404);
     expect((await patchProduct(P1, { sku: "", name: "x" })).status).toBe(400);
+  });
+  it("saves the description and image link in the table's own columns (image_url), and reads them back", async () => {
+    h.calls.length = 0;
+    const body = { sku: "CC-003", name: "Dainty chain", description: "  A fine chain.\nSize 16 in.  ", imageUrl: "https://img.example.com/a.jpg", org_id: "attacker-org", image_url: "http://evil.test/x" };
+    expect((await postProduct(body)).status).toBe(201);
+    const ins = h.calls.find((c) => c.table === "products" && c.op === "insert")!;
+    expect(ins.payload).toMatchObject({ org_id: ORG, description: "A fine chain.\nSize 16 in.", image_url: "https://img.example.com/a.jpg" });
+    expect(ins.payload).not.toHaveProperty("imageUrl");
+    h.calls.length = 0;
+    expect((await patchProduct(P1, { sku: "CC-001", name: "Mini hoop", description: "", imageUrl: "" })).status).toBe(200);
+    expect(h.calls.find((c) => c.table === "products" && c.op === "update")!.payload).toMatchObject({ description: null, image_url: null });
+    h.tables.products = [productRow({ description: "Soft and light.", image_url: "https://img.example.com/b.jpg" })];
+    expect(await getProduct(P1)).toMatchObject({ description: "Soft and light.", imageUrl: "https://img.example.com/b.jpg" });
+  });
+  it("rejects an image link that is not a plain https URL, and an over-long description (400, nothing written)", async () => {
+    h.calls.length = 0;
+    for (const bad of [{ imageUrl: "http://img.example.com/a.jpg" }, { imageUrl: "javascript:alert(1)" }, { imageUrl: "data:image/png;base64,AAAA" }, { imageUrl: "https://a b.com/x" },
+      { imageUrl: "not a url" }, { imageUrl: `https://e.com/${"a".repeat(2050)}` }, { description: "x".repeat(2001) }, { imageUrl: 5 }]) {
+      expect((await postProduct({ sku: "S", name: "N", ...bad })).status, JSON.stringify(bad).slice(0, 50)).toBe(400);
+    }
+    expect(h.calls.filter((c) => c.op === "insert")).toEqual([]);
+    expect(parseProductInput({ sku: "A", name: "B", description: "x".repeat(2000), imageUrl: "https://e.com/a.png" })).not.toBeNull();
   });
   it("only owner, admin, approver and staff may write; a viewer gets 403", async () => {
     for (const role of ["owner", "admin", "approver", "staff"]) { setRole(role); expect((await postProduct({ sku: "S", name: "N" })).status, role).toBe(201); }
@@ -501,12 +523,12 @@ describe("slice 3: live products", () => {
     setMembership(true);
     expect((await getProducts()).some((p) => p.id === P1)).toBe(false);
     expect((await getProducts()).length).toBeGreaterThan(0);
-    expect(await createProduct({ sku: "S", name: "N", category: null, price: null, stock: null, status: "draft", channels: [] })).toBeNull();
-    expect(await updateProduct(P1, { sku: "S", name: "N", category: null, price: null, stock: null, status: "draft", channels: [] })).toBeNull();
+    expect(await createProduct({ sku: "S", name: "N", category: null, price: null, stock: null, description: null, imageUrl: null, status: "draft", channels: [] })).toBeNull();
+    expect(await updateProduct(P1, { sku: "S", name: "N", category: null, price: null, stock: null, description: null, imageUrl: null, status: "draft", channels: [] })).toBeNull();
     expect((await postProduct({ sku: "S", name: "N" })).status).toBe(404);
   });
   it("validation helper clamps to the table's limits", () => {
-    expect(parseProductInput({ sku: " A ", name: " B " })).toEqual({ sku: "A", name: "B", category: null, price: null, stock: null, status: "draft", channels: [] });
+    expect(parseProductInput({ sku: " A ", name: " B " })).toEqual({ sku: "A", name: "B", category: null, price: null, stock: null, description: null, imageUrl: null, status: "draft", channels: [] });
     expect(parseProductInput({ sku: "A", name: "B", price: 100_000_000 })).toBeNull();
     expect(parseProductInput({ sku: "A", name: "B", price: "12.345" })?.price).toBe(12.35);
   });

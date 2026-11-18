@@ -23,6 +23,12 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         <DashboardCard>
           <SectionHeader title="Details" />
           <dl style={{ margin: 0 }}>
+            {p.imageUrl && (
+              // A plain img on purpose: the link can point at any https host, so next/image's host allow-list does not apply. No referrer is sent.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={p.imageUrl} alt={p.name} referrerPolicy="no-referrer" loading="lazy" style={{ maxWidth: "100%", maxHeight: 280, borderRadius: 12, marginBottom: 14, display: "block" }} />
+            )}
+            <dt className="muted">Description</dt><dd style={{ whiteSpace: "pre-wrap" }}>{p.description || "Not set"}</dd>
             <dt className="muted">Price</dt><dd>{p.price === null ? "Not set" : <Money value={p.price} />}</dd>
             <dt className="muted">Stock</dt><dd>{p.stock ?? "Not set"}</dd>
             <dt className="muted">Channels</dt><dd>{p.channels.length ? p.channels.map((c) => <span className="tag" key={c}>{c}</span>) : "None"}</dd>
@@ -33,7 +39,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
             <SectionHeader title="Edit product" />
             <ProductForm productId={p.id} initial={{
               sku: p.sku, name: p.name, category: p.category, price: p.price === null ? "" : String(p.price), stock: p.stock === null ? "" : String(p.stock),
-              status: p.status, channels: p.channels.join(", "),
+              status: p.status, channels: p.channels.join(", "), description: p.description ?? "", imageUrl: p.imageUrl ?? "",
             }} />
           </DashboardCard>
         )}

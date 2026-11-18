@@ -43,6 +43,7 @@ beforeAll(async () => {
   db = new PGlite();
   await db.exec(stub);
   await db.exec(readFileSync("supabase/migrations/20261101000000_foundation.sql", "utf8"));
+  await db.exec(readFileSync("supabase/migrations/20261113000000_product_description_image.sql", "utf8"));
   const users = Object.values(U).map((id) => `('${id}', '{}')`).join(",");
   await db.exec(`
     insert into auth.users (id, raw_user_meta_data) values ${users};
@@ -218,6 +219,18 @@ describe("products and content items (real SQL in PGlite, not the hosted project
     for (const bad of [`platform = 'TikTok'`, `status = 'live'`, `caption = '${"x".repeat(2201)}'`]) {
       expect(await as(U.staffA, () => fails(`update public.content_items set ${bad} where id = '${CA}'`)), bad).toMatch(/check constraint/);
     }
+  });
+  it("description and image_url: writers can set them, shape checks reject bad values, other organisations and viewers stay blocked", async () => {
+    await as(U.staffA, () => db.query(`update public.products set description = 'Fine chain', image_url = 'https://img.example.com/a.jpg' where id = '${PA}'`));
+    expect((await rows(`select description, image_url from public.products where id = '${PA}'`))[0]).toEqual({ description: "Fine chain", image_url: "https://img.example.com/a.jpg" });
+    for (const bad of ["image_url = 'http://img.example.com/a.jpg'", "image_url = 'javascript:alert(1)'", "image_url = 'data:image/png;base64,AAAA'", "image_url = 'https://a b.com'",
+      `image_url = 'https://e.com/${"a".repeat(2050)}'`, `description = '${"x".repeat(2001)}'`]) {
+      expect(await as(U.staffA, () => fails(`update public.products set ${bad} where id = '${PA}'`)), bad.slice(0, 40)).toMatch(/check constraint/);
+    }
+    await as(U.staffA, () => db.query(`update public.products set description = null, image_url = null where id = '${PA}'`)); // clearing is allowed
+    await as(U.viewerA, () => db.query(`update public.products set description = 'Hacked' where id = '${PA}'`));
+    await as(U.ownerA, () => db.query(`update public.products set description = 'Hijacked' where id = '${PB}'`));
+    expect((await rows(`select description from public.products where id in ('${PA}', '${PB}')`)).map((r) => r.description)).toEqual([null, null]);
   });
   it("only owner or admin can delete products", async () => {
     await as(U.staffA, () => db.query(`delete from public.products where sku = 'SKU-2'`));

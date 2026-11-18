@@ -5,8 +5,8 @@ import { useState } from "react";
 
 const STATUSES: [string, string][] = [["draft", "Draft"], ["active", "Active"], ["low_stock", "Low stock"], ["archived", "Archived"]];
 
-interface Values { sku: string; name: string; category: string; price: string; stock: string; status: string; channels: string }
-const EMPTY: Values = { sku: "", name: "", category: "", price: "", stock: "", status: "draft", channels: "" };
+interface Values { sku: string; name: string; category: string; price: string; stock: string; status: string; channels: string; description: string; imageUrl: string }
+const EMPTY: Values = { sku: "", name: "", category: "", price: "", stock: "", status: "draft", channels: "", description: "", imageUrl: "" };
 
 /** Create (no productId) or edit (productId) a product. Only the fields the products table has. The organisation is never
  *  sent: the server takes it from the signed-in session. */
@@ -30,7 +30,7 @@ export function ProductForm({ productId, initial }: { productId?: string; initia
         if (!productId) setV(EMPTY);
         router.refresh();
       } else {
-        setNotice({ kind: "error", text: res.status === 400 ? "Check the fields: SKU and name are required, price and stock must be numbers of 0 or more." : json.error ?? "Something went wrong. Please try again." });
+        setNotice({ kind: "error", text: res.status === 400 ? "Check the fields: SKU and name are required, price and stock must be numbers of 0 or more, the description can be up to 2000 characters, and the image link must start with https://." : json.error ?? "Something went wrong. Please try again." });
       }
     } catch {
       setNotice({ kind: "error", text: "Could not reach the server. Please try again." });
@@ -47,6 +47,10 @@ export function ProductForm({ productId, initial }: { productId?: string; initia
         <input id={`p-sku-${id}`} value={v.sku} maxLength={64} onChange={(e) => set("sku", e.target.value)} /></div>
       <div className="field"><label htmlFor={`p-cat-${id}`}>Category</label>
         <input id={`p-cat-${id}`} value={v.category} maxLength={100} onChange={(e) => set("category", e.target.value)} /></div>
+      <div className="field"><label htmlFor={`p-desc-${id}`}>Description</label>
+        <textarea id={`p-desc-${id}`} value={v.description} maxLength={2000} rows={3} onChange={(e) => set("description", e.target.value)} placeholder="Optional. Facts only: what the piece is, size, what it comes with." /></div>
+      <div className="field"><label htmlFor={`p-img-${id}`}>Image link</label>
+        <input id={`p-img-${id}`} type="url" inputMode="url" value={v.imageUrl} maxLength={2048} onChange={(e) => set("imageUrl", e.target.value)} placeholder="Optional. A link starting with https://" /></div>
       <div className="field"><label htmlFor={`p-price-${id}`}>Price (₹)</label>
         <input id={`p-price-${id}`} inputMode="decimal" value={v.price} onChange={(e) => set("price", e.target.value)} placeholder="Leave blank if not set" /></div>
       <div className="field"><label htmlFor={`p-stock-${id}`}>Stock</label>

@@ -302,7 +302,13 @@ export async function liveMoveDeal(id: string, stage: PipelineStage): Promise<De
 
 /* ---------- Products ---------- */
 
-const PRODUCT_COLS = "id, sku, name, category, price, stock, status, channels, created_at";
+const PRODUCT_COLS = "id, sku, name, category, price, stock, status, channels, description, image_url, created_at";
+
+/** The table's own column names. The input uses camelCase for the image link; nothing else (never org_id) is passed through. */
+const productColumns = (i: ProductInput) => ({
+  sku: i.sku, name: i.name, category: i.category, price: i.price, stock: i.stock, status: i.status, channels: i.channels,
+  description: i.description, image_url: i.imageUrl,
+});
 
 /** Postgres unique_violation: the (org_id, sku) constraint. */
 const isDuplicate = (error: { code?: string; message: string }) => error.code === "23505" || /duplicate key/i.test(error.message);
@@ -324,7 +330,7 @@ export async function liveProduct(id: string): Promise<Product | null> {
 
 export async function liveCreateProduct(input: ProductInput): Promise<Product> {
   const { supabase, orgId } = await ctx();
-  const { data, error } = await supabase.from("products").insert({ org_id: orgId, ...input }).select(PRODUCT_COLS).single();
+  const { data, error } = await supabase.from("products").insert({ org_id: orgId, ...productColumns(input) }).select(PRODUCT_COLS).single();
   if (error) {
     if (isDuplicate(error)) throw new ConflictError("A product with this SKU already exists");
     fail(error);
@@ -336,7 +342,7 @@ export async function liveCreateProduct(input: ProductInput): Promise<Product> {
 export async function liveUpdateProduct(id: string, input: ProductInput): Promise<Product | null> {
   if (!UUID.test(id)) return null;
   const { supabase, orgId } = await ctx();
-  const { data, error } = await supabase.from("products").update(input).eq("org_id", orgId).eq("id", id).select(PRODUCT_COLS);
+  const { data, error } = await supabase.from("products").update(productColumns(input)).eq("org_id", orgId).eq("id", id).select(PRODUCT_COLS);
   if (error) {
     if (isDuplicate(error)) throw new ConflictError("A product with this SKU already exists");
     fail(error);

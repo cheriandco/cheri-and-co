@@ -98,3 +98,10 @@ agent runs, agent actions, recommendations, brand assets, follow-ups as a separa
 - Authentication decision (see `docs/API.md` §5), because row-level security depends on user identity.
 - Answers to §4 before any migration is written.
 - A migration process and a separate staging database (see the deployment strategy).
+
+## Product description and image link (Milestone 1.1)
+
+`supabase/migrations/20261113000000_product_description_image.sql` adds two optional columns to `products`: `description` (text, at most 2000 characters) and `image_url`
+(an https link of at most 2048 characters, no spaces; a link, not an uploaded file, so no storage bucket is involved). It adds no table, policy, grant or function; the
+existing row level security and grants already cover the columns. **Status: NOT APPLIED.** Apply it before using the app version that reads these columns: until it is
+applied, the live Products page cannot read them. The API (`POST /api/products`, `PATCH /api/products/{id}`) takes `description` and `imageUrl` and returns them on the product.

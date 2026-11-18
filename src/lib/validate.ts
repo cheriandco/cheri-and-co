@@ -44,7 +44,7 @@ export function parseRetailerInput(b: Record<string, unknown> | null): RetailerI
 
 export const PRODUCT_STATUSES = ["draft", "active", "low_stock", "archived"] as const;
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
-export interface ProductInput { sku: string; name: string; category: string | null; price: number | null; stock: number | null; status: ProductStatus; channels: string[] }
+export interface ProductInput { sku: string; name: string; category: string | null; price: number | null; stock: number | null; description: string | null; imageUrl: string | null; status: ProductStatus; channels: string[] }
 
 /** Optional number: blank is fine (null), anything else must be a finite number in range (undefined means invalid). */
 function num(v: unknown, min: number, max: number, integer: boolean): number | null | undefined {
@@ -54,20 +54,33 @@ function num(v: unknown, min: number, max: number, integer: boolean): number | n
   return integer ? n : Math.round(n * 100) / 100;
 }
 
-/** The columns of `products`, nothing more. Limits match the table's check constraints (price numeric(10,2) >= 0, stock integer >= 0). */
+/** Optional picture link: blank is null; otherwise one https URL without spaces, at most 2048 characters (matches the table's check). undefined = invalid. */
+function httpsUrl(v: unknown): string | null | undefined {
+  if (v === undefined || v === null || (typeof v === "string" && v.trim() === "")) return null;
+  if (typeof v !== "string") return undefined;
+  const s = v.trim();
+  if (s.length > 2048 || /\s/.test(s)) return undefined;
+  try { return new URL(s).protocol === "https:" ? s : undefined; } catch { return undefined; }
+}
+
+/** The columns of `products`, nothing more. Limits match the table's check constraints (price numeric(10,2) >= 0, stock integer >= 0,
+ *  description <= 2000 characters, image_url an https link <= 2048 characters). */
 export function parseProductInput(b: Record<string, unknown> | null): ProductInput | null {
   const sku = str(b?.sku, 64);
   const name = str(b?.name, 200);
   const category = opt(b?.category, 100);
   const price = num(b?.price, 0, 99_999_999.99, false);
   const stock = num(b?.stock, 0, 1_000_000_000, true);
+  const description = opt(b?.description, 2000);
+  const imageUrl = httpsUrl(b?.imageUrl);
   const status = b?.status === undefined || b.status === "" ? "draft" : b.status;
   const raw = b?.channels;
   const list = raw === undefined || raw === null ? [] : Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(",") : null;
   const channels = list && list.length <= 20 && list.every((c) => typeof c === "string") ? [...new Set((list as string[]).map((c) => c.trim()).filter(Boolean))] : null;
-  if (!sku || !name || category === undefined || price === undefined || stock === undefined || channels === null || channels.some((c) => c.length > 40)) return null;
+  if (!sku || !name || category === undefined || price === undefined || stock === undefined || description === undefined || imageUrl === undefined
+    || channels === null || channels.some((c) => c.length > 40)) return null;
   if (typeof status !== "string" || !(PRODUCT_STATUSES as readonly string[]).includes(status)) return null;
-  return { sku, name, category, price, stock, status: status as ProductStatus, channels };
+  return { sku, name, category, price, stock, description, imageUrl, status: status as ProductStatus, channels };
 }
 
 export interface OrderInput { customerId: string | null; retailerId: string | null; channel: OrderChannel; status: OrderStatus; total: number; lineItems: Record<string, unknown>[]; orderedAt: string | null }

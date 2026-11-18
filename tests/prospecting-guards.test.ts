@@ -63,8 +63,8 @@ describe("the prospecting module is isolated", () => {
   });
   it("adds no migration and no dependency", () => {
     const migrations = readdirSync(join(root, "supabase", "migrations")).sort();
-    // The third file is the reviewed, NOT-yet-applied revoke of rls_auto_enable() EXECUTE. No ai_usage migration exists: AI spend limits use agent_activity.
-    expect(migrations).toEqual(["20261101000000_foundation.sql", "20261111000000_amazon_intelligence.sql", "20261112000000_revoke_rls_auto_enable_execute.sql"]);
+    // The third file is the reviewed, NOT-yet-applied revoke of rls_auto_enable() EXECUTE; the fourth adds products.description and products.image_url (also not applied). No ai_usage migration exists: AI spend limits use agent_activity.
+    expect(migrations).toEqual(["20261101000000_foundation.sql", "20261111000000_amazon_intelligence.sql", "20261112000000_revoke_rls_auto_enable_execute.sql", "20261113000000_product_description_image.sql"]);
     const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { dependencies: Record<string, string>; devDependencies: Record<string, string> };
     expect(Object.keys(pkg.dependencies).sort()).toEqual(["@supabase/ssr", "@supabase/supabase-js", "lucide-react", "next", "react", "react-dom"]);
     expect(Object.keys(pkg.devDependencies).sort()).toEqual(["@electric-sql/pglite", "@types/node", "@types/react", "@types/react-dom", "eslint", "eslint-config-next", "typescript", "vitest"]);
