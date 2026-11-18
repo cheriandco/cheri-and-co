@@ -4,7 +4,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type Row = Record<string, unknown>;
-const db = vi.hoisted(() => ({ t: {} as Record<string, Row[]>, reads: [] as string[], n: 0 }));
+const db = vi.hoisted(() => ({
+  t: {} as Record<string, Row[]>, reads: [] as string[], n: 0,
+  /** Makes opening this table throw a TypeError (a code fault), or makes an insert into content_items fail like the database refusing it. */
+  crash: "", insertError: null as null | { code: string; message: string },
+}));
 
 vi.mock("@/lib/supabase/server", () => ({
   createSupabaseServerClient: async () => ({
@@ -19,6 +23,7 @@ vi.mock("@/lib/supabase/server", () => ({
     },
     from: (table: string) => {
       db.reads.push(table);
+      if (db.crash === table) throw new TypeError("boom: simulated code fault");
       let op = "select";
       let payload: Row = {};
       const eq: [string, unknown][] = [];
@@ -42,6 +47,7 @@ vi.mock("@/lib/supabase/server", () => ({
           const match = (r: Row) => eq.every(([k, v]) => r[k] === v) && inn.every(([k, v]) => v.includes(r[k])) && like.every(([k, v]) => String(r[k]).startsWith(v.replace(/%$/, "")))
             && gte.every(([k, v]) => String(r[k]) >= v);
           let out: Row[];
+          if (op === "insert" && table === "content_items" && db.insertError) return resolve({ data: null, error: db.insertError });
           if (op === "insert") {
             const made: Row = { id: table === "agent_activity" || table === "audit_log" ? ++db.n : crypto.randomUUID(), created_at: new Date().toISOString(), ...(table === "content_items" ? { approval_id: null } : {}), ...payload };
             rows.push(made);
@@ -241,7 +247,7 @@ const aiOn = () => { vi.stubEnv("AI_ENABLED", "true"); vi.stubEnv("OPENAI_API_KE
 beforeEach(() => {
   for (const k of ENV) vi.stubEnv(k, "");
   vi.stubEnv("AUTH_MODE", "required"); vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.invalid"); vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon-test");
-  db.reads.length = 0; db.n = 0;
+  db.reads.length = 0; db.n = 0; db.crash = ""; db.insertError = null;
   (globalThis as { __aiLimiter?: unknown }).__aiLimiter = undefined; // the per-minute limiter is process-wide; each test starts fresh
   const product = (over: Row) => ({ id: P1, org_id: ORG, sku: "CC-001", name: "Pearl hoop earrings", category: "Earrings", price: "1499.00", stock: 12, status: "active", channels: [], description: "Small pearl hoops. Comes in a gift box.", image_url: IMAGE, created_at: stamp, ...over });
   db.t = {
@@ -354,6 +360,46 @@ describe("live workflow: product -> generate -> save -> edit -> regenerate -> ap
     expect(body.data.topic).toMatch(/^Template draft/);
     expect(t.calls).toHaveLength(0);
     expect(mine("agent_activity").some((r2) => String(r2.action).startsWith("AI call v1"))).toBe(false);
+  });
+
+  it("AI off: the whole flow works on templates and never resolves the AI runtime, transport, key or ledger", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "sk-test-not-real"); // present, but AI_ENABLED is not true
+    const t = fakeTransport(okBody(GOOD));
+    __setAiTransportForTests(t.transport);
+    const made = (await (await generate({ productId: P1, kind: "instagram_caption", audience: "everyday" })).json()) as { data: { id: string; caption: string; status: string }; generator: string };
+    expect(made).toMatchObject({ generator: "template", data: { status: "draft" } });
+    expect(made.data.caption).toContain("Pearl hoop earrings");
+    expect(mine("content_items")).toHaveLength(1);
+    expect((await action(made.data.id, "edit", { title: "T", topic: "Template draft · Instagram caption · Pearl hoop earrings", platform: "Instagram", caption: "Edited by a person.", hashtags: "#CheriAndCo", creativeBrief: "", imageDirection: "" })).status).toBe(200);
+    expect((await generate({ productId: P1, kind: "instagram_caption", audience: "everyday", postId: made.data.id })).status).toBe(200);
+    expect(mine("content_items")).toHaveLength(1);
+    expect((await action(made.data.id, "submit")).status).toBe(200);
+    expect(mine("approvals")[0]).toMatchObject({ status: "pending", org_id: ORG });
+    expect(t.calls).toHaveLength(0);
+    expect(mine("agent_activity").some((r) => String(r.action).startsWith("AI call v1"))).toBe(false);
+    expect(mine("agent_activity").map((r) => String(r.action))).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^Generated Instagram caption for Pearl hoop earrings: Template draft$/), expect.stringMatching(/^Regenerated /), expect.stringMatching(/^Sent /),
+    ]));
+  });
+
+  it("a database refusal or a code fault answers with JSON that says what kind of failure it was, and logs the real cause", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      db.insertError = { code: "23514", message: 'new row for relation "content_items" violates check constraint "x"' };
+      const refused = await generate({ productId: P1, kind: "instagram_caption", audience: "everyday" });
+      expect(refused.status).toBe(500);
+      expect(((await refused.json()) as { error: string }).error).toMatch(/database refused/);
+      expect(spy.mock.calls.flat().join(" ")).toMatch(/23514.*violates check constraint/);
+      expect(mine("content_items")).toHaveLength(0);
+
+      db.insertError = null; db.crash = "products";
+      const crashed = await generate({ productId: P1, kind: "instagram_caption", audience: "everyday" });
+      expect(crashed.status).toBe(500);
+      const body = (await crashed.json()) as { error: string };
+      expect(body.error).toMatch(/server error/);
+      expect(JSON.stringify(body)).not.toMatch(/sk-|boom|TypeError/); // the page gets a safe message; the log gets the detail
+      expect(spy.mock.calls.flat().join(" ")).toMatch(/TypeError: boom/);
+    } finally { spy.mockRestore(); }
   });
 
   it("no customer record is read or sent: only the products table feeds the Studio", async () => {

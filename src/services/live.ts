@@ -62,6 +62,8 @@ async function ctx() {
 function fail(error: { code?: string; message: string }): never {
   if (error.code === "42501" || /row-level security|permission denied|not authorized/i.test(error.message))
     throw new AuthError(403, "You do not have permission to do this");
+  // The caller sees a fixed message; the server log keeps the true cause (Postgres code and message: no keys, tokens or row data).
+  console.error("[db] request failed:", error.code ?? "no code", "|", String(error.message).slice(0, 300));
   throw new LiveError("Database request failed");
 }
 

@@ -25,7 +25,7 @@ async function call<T>(url: string, body?: unknown): Promise<{ ok: true; json: T
   try {
     const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
     const json = (await res.json().catch(() => ({}))) as T & { error?: string; issues?: string[] };
-    return res.ok ? { ok: true, json } : { ok: false, error: json.error ?? "Something went wrong. Please try again.", issues: json.issues };
+    return res.ok ? { ok: true, json } : { ok: false, error: json.error ?? `The server returned an error (HTTP ${res.status}) with no details. The server log has the cause.`, issues: json.issues };
   } catch {
     return { ok: false, error: "Could not reach the server. Please try again." };
   }

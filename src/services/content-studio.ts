@@ -3,6 +3,7 @@
  *  aiRuntime() passes; otherwise a template), then saves through the existing content functions so the activity history is written the same way.
  *  The draft is only a draft: sending it for approval is a separate, human step (POST /api/social/posts/:id/submit). Nothing is published. */
 import { isLiveOrg } from "@/lib/auth/access";
+import { readAiConfig } from "@/lib/ai/config";
 import { runStudio, type StudioProduct } from "@/lib/content-studio/generate";
 import { KIND_META, type StudioKind } from "@/lib/content-studio/kinds";
 import { STUDIO_PROMPT_VERSION } from "@/lib/content-studio/prompt";
@@ -32,7 +33,9 @@ export async function generateStudioDraft(input: StudioRequestInput): Promise<St
   }
 
   const product: StudioProduct = { id: p.id, name: p.name, category: p.category, description: p.description ?? null, imageUrl: p.imageUrl ?? null };
-  const outcome = await runStudio({ product, kind: input.kind, audience: input.audience, theme: input.theme }, await aiRuntime());
+  // AI off (the default): the AI runtime is never even consulted, so no transport, key or usage ledger is touched. It is resolved only when AI_ENABLED is on.
+  const runtime = readAiConfig().enabled ? await aiRuntime() : null;
+  const outcome = await runStudio({ product, kind: input.kind, audience: input.audience, theme: input.theme }, runtime);
   const label = KIND_META[input.kind].label;
   const how = outcome.generator === "openai" ? `AI draft (${outcome.model}, ${outcome.promptVersion ?? STUDIO_PROMPT_VERSION})` : "Template draft";
 

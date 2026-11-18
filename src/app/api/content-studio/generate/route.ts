@@ -1,4 +1,4 @@
-import { deny, errorResponse } from "@/lib/auth/access";
+import { AuthError, ConflictError, deny, errorResponse } from "@/lib/auth/access";
 import { NextResponse } from "next/server";
 import { isStudioKind } from "@/lib/content-studio/kinds";
 import { cleanTheme } from "@/lib/content-studio/prompt";
@@ -29,5 +29,15 @@ export async function POST(req: Request) {
     const res = await generateStudioDraft({ productId: b.productId, kind: b.kind, audience: audience as Audience, theme: theme.theme, postId: b.postId as string | undefined });
     if (!res.ok) return NextResponse.json({ error: res.error }, { status: STATUS[res.reason] });
     return NextResponse.json({ data: res.post, generator: res.generator, note: res.note, regenerated: res.regenerated }, { status: res.regenerated ? 200 : 201 });
-  } catch (e) { return errorResponse(e); }
+  } catch (e) {
+    if (e instanceof AuthError || e instanceof ConflictError) return errorResponse(e);
+    // Anything else is a real fault (a database error, a code error). Log the true cause on the server (name and message only: never the
+    // request body, a key or a token) and answer with JSON, so the page can say what happened instead of a blank "something went wrong".
+    console.error("[content-studio/generate]", e instanceof Error ? `${e.name}: ${e.message}` : "unknown error");
+    const db = e instanceof Error && e.name === "Error" && e.message === "Database request failed";
+    return NextResponse.json({
+      error: db ? "The draft could not be saved because the database refused the request. The server log has the exact reason."
+        : "The draft could not be generated because of a server error. The server log has the details.",
+    }, { status: 500, headers: { "Cache-Control": "no-store" } });
+  }
 }
